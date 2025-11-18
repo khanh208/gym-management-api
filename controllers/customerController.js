@@ -15,7 +15,7 @@ const getAllCustomers = async (req, res) => {
 // --- LẤY KHÁCH HÀNG THEO ID (Admin & Chính chủ) ---
 const getCustomerById = async (req, res) => {
     const { id: customerIdToView } = req.params;
-    const loggedInUser = req.user; // Lấy từ middleware 'protect'
+    const loggedInUser = req.user;
 
     try {
         const query = 'SELECT * FROM khach_hang WHERE khach_id = $1';
@@ -26,7 +26,6 @@ const getCustomerById = async (req, res) => {
             return res.status(404).json({ message: 'Không tìm thấy khách hàng.' });
         }
 
-        // Logic phân quyền: Admin hoặc chính chủ
         if (loggedInUser.role === 'customer' && customer.tai_khoan_id != loggedInUser.user_id) {
             return res.status(403).json({ message: 'Cấm! Bạn không có quyền xem hồ sơ của người khác.' });
         }
@@ -39,7 +38,6 @@ const getCustomerById = async (req, res) => {
 };
 
 // --- TẠO KHÁCH HÀNG MỚI (Dùng nội bộ khi đăng ký) ---
-// Hàm này được gọi bởi authController, không gọi trực tiếp qua API
 const createCustomer = async (ho_ten, email, tai_khoan_id) => {
     try {
         const query = `
@@ -47,10 +45,10 @@ const createCustomer = async (ho_ten, email, tai_khoan_id) => {
             VALUES ($1, $2, $3) RETURNING khach_id;
         `;
         const { rows } = await db.query(query, [ho_ten, email, tai_khoan_id]);
-        return rows[0]; // Trả về hồ sơ khách hàng mới
+        return rows[0]; 
     } catch (error) {
         console.error("Lỗi khi tạo hồ sơ khách hàng tự động:", error);
-        throw error; // Ném lỗi để authController xử lý
+        throw error; 
     }
 };
 
@@ -58,10 +56,9 @@ const createCustomer = async (ho_ten, email, tai_khoan_id) => {
 const updateCustomer = async (req, res) => {
     const { id: customerIdToUpdate } = req.params;
     const { ho_ten, email, so_dien_thoai } = req.body;
-    const loggedInUser = req.user; // Lấy từ middleware 'protect'
+    const loggedInUser = req.user; 
 
     try {
-        // Lấy hồ sơ khách hàng để kiểm tra quyền
         const customerResult = await db.query('SELECT tai_khoan_id FROM khach_hang WHERE khach_id = $1', [customerIdToUpdate]);
         const customer = customerResult.rows[0];
 
@@ -69,12 +66,10 @@ const updateCustomer = async (req, res) => {
             return res.status(404).json({ message: 'Không tìm thấy khách hàng.' });
         }
 
-        // Logic phân quyền: Admin hoặc chính chủ
         if (loggedInUser.role === 'customer' && customer.tai_khoan_id != loggedInUser.user_id) {
             return res.status(403).json({ message: 'Cấm! Bạn không có quyền cập nhật hồ sơ của người khác.' });
         }
 
-        // Admin hoặc chính chủ thì được cập nhật
         const query = `
             UPDATE khach_hang
             SET ho_ten = $1, email = $2, so_dien_thoai = $3
@@ -93,10 +88,8 @@ const updateCustomer = async (req, res) => {
 const deleteCustomer = async (req, res) => {
     const { id } = req.params;
     try {
-        // Cân nhắc xử lý các bảng liên quan trước khi xóa
-        // await db.query('DELETE FROM goi_khach_hang WHERE khach_id = $1', [id]);
-        // await db.query('DELETE FROM dat_lich WHERE khach_id = $1', [id]);
-        // await db.query('DELETE FROM thanh_toan WHERE khach_id = $1', [id]);
+        // Cần xem xét xử lý các bảng liên quan trước khi xóa
+        // VD: TRUNCATE TABLE goi_khach_hang CASCADE sẽ an toàn hơn trong môi trường test
         
         const { rowCount } = await db.query('DELETE FROM khach_hang WHERE khach_id = $1', [id]);
         if (rowCount === 0) {
@@ -114,7 +107,7 @@ const deleteCustomer = async (req, res) => {
 
 // --- LẤY GÓI TẬP CỦA TÔI (Cho Customer) ---
 const getMyPackages = async (req, res) => {
-    const tai_khoan_id = req.user.user_id; 
+    const tai_khoan_id = req.user.user_id; // Lấy tài khoản ID từ token
 
     try {
         const customerResult = await db.query(
@@ -126,10 +119,11 @@ const getMyPackages = async (req, res) => {
         }
         const khach_id = customerResult.rows[0].khach_id;
 
+        // JOIN 3 bảng để lấy đủ thông tin
         const packages = await db.query(
             `SELECT
                 gkh.gkh_id,
-                gkh.khach_id, -- <-- THÊM DÒNG NÀY
+                gkh.khach_id,
                 gkh.ngay_kich_hoat,
                 gkh.ngay_het_han,
                 gkh.trang_thai,
@@ -192,27 +186,23 @@ const registerFreeTrial = async (req, res) => {
         
         const { goi_tap_id, thoi_han, ca_buoi, gia } = packageInfoResult.rows[0];
         
-        console.log(`[Free Trial Check] Giá gói: ${gia} (Type: ${typeof gia})`);
-
-// So sánh an toàn (cho cả chuỗi '0.00' và số 0)
-if (Number(gia) > 0) {
-    return res.status(400).json({ message: 'Đây không phải là gói tập miễn phí.' });
-}
+        if (parseFloat(gia) !== 0) {
+            return res.status(400).json({ message: 'Đây không phải là gói tập miễn phí.' });
+        }
         
-        // --- SỬA LOGIC CHECK Ở ĐÂY ---
+        // --- LOGIC CHECK Ở ĐÂY ---
         // Check 2: Khách hàng đã TỪNG DÙNG (active, pending, used, expired) gói này CHƯA?
-        // Gói 'cancelled' sẽ không được tính, cho phép đăng ký lại.
         const existingTrial = await db.query(
             `SELECT 1 FROM goi_khach_hang 
              WHERE khach_id = $1 
                AND gia_id = $2
-               AND trang_thai != 'cancelled'`, // <-- CHỈ KIỂM TRA CÁC TRẠNG THÁI KHÁC 'cancelled'
+               AND trang_thai != 'cancelled'`, 
             [khach_id, gia_id]
         );
         if (existingTrial.rows.length > 0) {
             return res.status(400).json({ message: 'Bạn đã đăng ký hoặc đã sử dụng gói thử này rồi.' });
         }
-        // --- KẾT THÚC SỬA LOGIC ---
+        // --- KẾT THÚC LOGIC ---
         
         // 3. Tạo bản ghi thanh toán "giả" (0 VND)
         const insertPaymentResult = await db.query(
@@ -247,7 +237,7 @@ if (Number(gia) > 0) {
         
         // 5. Tính toán ngày hết hạn
         let ngay_het_han = null;
-        let tong_so_buoi = ca_buoi;
+        let tong_so_buoi = ca_buoi; // Lấy số buổi từ bảng giá
         if (thoi_han) {
             const parts = thoi_han.toLowerCase().split(' ');
             const value = parseInt(parts[0]);
@@ -282,7 +272,6 @@ if (Number(gia) > 0) {
     } catch (error) {
         await db.query('ROLLBACK');
         console.error("Lỗi khi đăng ký gói thử:", error);
-        // Gửi về lỗi cụ thể nếu có (ví dụ: 'Bạn đã đăng ký gói thử này rồi.')
         if (error.message.includes('Gói giá không tồn tại') || error.message.includes('Không tìm thấy hồ sơ')) {
              return res.status(404).json({ message: error.message });
         }
@@ -290,7 +279,7 @@ if (Number(gia) > 0) {
     }
 };
 
-// --- EXPORT TẤT CẢ HÀM ---
+// --- EXPORT ---
 module.exports = {
     getAllCustomers,
     getCustomerById,

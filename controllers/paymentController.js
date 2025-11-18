@@ -64,7 +64,7 @@ const createPayment = async (req, res) => {
         const requestId   = `${partnerCode}${Date.now()}`;
         const orderId     = requestId;
         const orderInfo   = `Thanh toan goi tap ${gia_id} cho khach ${khach_id}`;
-        const redirectUrl = 'http://localhost:3001/payment-success';
+        const redirectUrl = 'https://https:/gym-frontend-six-rosy.vercel.app/payment-success';
         const ipnUrl      = `${process.env.PUBLIC_URL}/api/payments/momo-ipn`;
         const requestType = 'captureWallet';
         // Gửi cả khach_id, gia_id, và ngay_kich_hoat
