@@ -15,7 +15,7 @@ const getAllCustomers = async (req, res) => {
 // --- LẤY KHÁCH HÀNG THEO ID (Admin & Chính chủ) ---
 const getCustomerById = async (req, res) => {
     const { id: customerIdToView } = req.params;
-    const loggedInUser = req.user;
+    const loggedInUser = req.user; // Lấy từ middleware 'protect'
 
     try {
         const query = 'SELECT * FROM khach_hang WHERE khach_id = $1';
@@ -26,6 +26,7 @@ const getCustomerById = async (req, res) => {
             return res.status(404).json({ message: 'Không tìm thấy khách hàng.' });
         }
 
+        // Logic phân quyền: Admin hoặc chính chủ
         if (loggedInUser.role === 'customer' && customer.tai_khoan_id != loggedInUser.user_id) {
             return res.status(403).json({ message: 'Cấm! Bạn không có quyền xem hồ sơ của người khác.' });
         }
@@ -45,10 +46,10 @@ const createCustomer = async (ho_ten, email, tai_khoan_id) => {
             VALUES ($1, $2, $3) RETURNING khach_id;
         `;
         const { rows } = await db.query(query, [ho_ten, email, tai_khoan_id]);
-        return rows[0]; 
+        return rows[0]; // Trả về hồ sơ khách hàng mới
     } catch (error) {
         console.error("Lỗi khi tạo hồ sơ khách hàng tự động:", error);
-        throw error; 
+        throw error; // Ném lỗi để authController xử lý
     }
 };
 
@@ -56,9 +57,10 @@ const createCustomer = async (ho_ten, email, tai_khoan_id) => {
 const updateCustomer = async (req, res) => {
     const { id: customerIdToUpdate } = req.params;
     const { ho_ten, email, so_dien_thoai } = req.body;
-    const loggedInUser = req.user; 
+    const loggedInUser = req.user; // Lấy từ middleware 'protect'
 
     try {
+        // Lấy hồ sơ khách hàng để kiểm tra quyền
         const customerResult = await db.query('SELECT tai_khoan_id FROM khach_hang WHERE khach_id = $1', [customerIdToUpdate]);
         const customer = customerResult.rows[0];
 
@@ -66,10 +68,12 @@ const updateCustomer = async (req, res) => {
             return res.status(404).json({ message: 'Không tìm thấy khách hàng.' });
         }
 
+        // Logic phân quyền: Admin hoặc chính chủ
         if (loggedInUser.role === 'customer' && customer.tai_khoan_id != loggedInUser.user_id) {
             return res.status(403).json({ message: 'Cấm! Bạn không có quyền cập nhật hồ sơ của người khác.' });
         }
 
+        // Admin hoặc chính chủ thì được cập nhật
         const query = `
             UPDATE khach_hang
             SET ho_ten = $1, email = $2, so_dien_thoai = $3
@@ -89,7 +93,7 @@ const deleteCustomer = async (req, res) => {
     const { id } = req.params;
     try {
         // Cần xem xét xử lý các bảng liên quan trước khi xóa
-        // VD: TRUNCATE TABLE goi_khach_hang CASCADE sẽ an toàn hơn trong môi trường test
+        // VD: TRUNCATE TABLE goi_khach_hang CASCADE an toàn hơn
         
         const { rowCount } = await db.query('DELETE FROM khach_hang WHERE khach_id = $1', [id]);
         if (rowCount === 0) {
@@ -151,7 +155,7 @@ const getMyPackages = async (req, res) => {
     }
 };
 
-// --- ĐĂNG KÝ GÓI THỬ MIỄN PHÍ (Cho Customer - ĐÃ SỬA LOGIC) ---
+// --- ĐĂNG KÝ GÓI THỬ MIỄN PHÍ (Cho Customer) ---
 const registerFreeTrial = async (req, res) => {
     const { gia_id, ngay_kich_hoat } = req.body;
     const tai_khoan_id = req.user.user_id;
@@ -190,19 +194,17 @@ const registerFreeTrial = async (req, res) => {
             return res.status(400).json({ message: 'Đây không phải là gói tập miễn phí.' });
         }
         
-        // --- LOGIC CHECK Ở ĐÂY ---
         // Check 2: Khách hàng đã TỪNG DÙNG (active, pending, used, expired) gói này CHƯA?
         const existingTrial = await db.query(
             `SELECT 1 FROM goi_khach_hang 
              WHERE khach_id = $1 
                AND gia_id = $2
-               AND trang_thai != 'cancelled'`, 
+               AND trang_thai != 'cancelled'`, // Chỉ cấm nếu chưa bị Admin hủy (đã dùng hết/active/pending)
             [khach_id, gia_id]
         );
         if (existingTrial.rows.length > 0) {
             return res.status(400).json({ message: 'Bạn đã đăng ký hoặc đã sử dụng gói thử này rồi.' });
         }
-        // --- KẾT THÚC LOGIC ---
         
         // 3. Tạo bản ghi thanh toán "giả" (0 VND)
         const insertPaymentResult = await db.query(
@@ -237,7 +239,7 @@ const registerFreeTrial = async (req, res) => {
         
         // 5. Tính toán ngày hết hạn
         let ngay_het_han = null;
-        let tong_so_buoi = ca_buoi; // Lấy số buổi từ bảng giá
+        let tong_so_buoi = ca_buoi;
         if (thoi_han) {
             const parts = thoi_han.toLowerCase().split(' ');
             const value = parseInt(parts[0]);
@@ -279,7 +281,7 @@ const registerFreeTrial = async (req, res) => {
     }
 };
 
-// --- EXPORT ---
+// --- EXPORT TẤT CẢ HÀM ---
 module.exports = {
     getAllCustomers,
     getCustomerById,
