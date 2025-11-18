@@ -6,7 +6,7 @@ require('dotenv').config();
 // Nếu DATABASE_URL tồn tại (tức là trên Render), nó sẽ được sử dụng.
 // Nếu không (tức là chạy local), nó sẽ cố gắng đọc các biến cũ (nhưng cách này không khuyến nghị).
 const connectionString = process.env.DATABASE_URL ||
-    `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_DATABASE}`;
+    `postgresql://postgres:khanh208@db.iyxngxwugmmzrdvnithj.supabase.co:5432/postgres`;
 
 const pool = new Pool({
     connectionString: connectionString,
