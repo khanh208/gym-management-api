@@ -1,0 +1,88 @@
+Quản lý Chi Nhánh (Branch Management)
+
+npx nodemon app.js
+
+1. XÁC THỰC (AUTHENTICATION)
+Đăng ký POST: http://localhost:3000/api/auth/register { "ho_ten": "Nguyen Van Tester", "email": "tester@example.com", "password": "Password123" }
+
+Xác thực tài khoản POST: http://localhost:3000/api/auth/verify-otp { "email": "tester@example.com", "otp": "12345" }
+
+Đăng nhập POST: http://localhost:3000/api/auth/login { "email": "tester@example.com", "password": "Password123" }
+
+Quên mật khẩu POST: http://localhost:3000/api/auth/forgot-password { "email": "tester@example.com" }
+
+Đặt lại mật khẩu POST: http://localhost:3000/api/auth/reset-password { "email": "tester@example.com", "otp": "54321", "newPassword": "NewPassword456" }
+
+Kiểm tra Email POST: http://localhost:3000/api/auth/check-email { "email": "tester@example.com" }
+
+2. QUẢN LÝ (YÊU CẦU TOKEN ADMIN)
+Tạo Chi nhánh POST: http://localhost:3000/api/branches { "ten_chi_nhanh": "NeoFitness Quận 10", "dia_chi": "789 Sư Vạn Hạnh, Q.10", "so_dien_thoai": "0909888777" }
+
+Sửa Chi nhánh PUT: http://localhost:3000/api/branches/1 { "ten_chi_nhanh": "NeoFitness Quận 10 (Updated)", "dia_chi": "789 Sư Vạn Hạnh, Q.10", "so_dien_thoai": "0909888777", "trang_thai": "dang hoat dong" }
+
+Xóa Chi nhánh DELETE: http://localhost:3000/api/branches/1
+
+Tạo Gói tập POST: http://localhost:3000/api/packages { "ten": "Gói Tập 1 Năm", "mo_ta": "Gói tập VIP 1 năm." }
+
+Sửa Gói tập PUT: http://localhost:3000/api/packages/1 { "ten": "Gói Tập 1 Năm (VIP)", "mo_ta": "Gói tập VIP 1 năm." }
+
+Xóa Gói tập DELETE: http://localhost:3000/api/packages/1
+
+Tạo Khuyến mãi POST: http://localhost:3000/api/promotions { "ten_khuyen_mai": "Giảm giá 30/4", "mo_ta": "Giảm 30% tất cả gói.", "giam_gia_phantram": 30 }
+
+Tạo Mức giá POST: http://localhost:3000/api/pricings { "goi_tap_id": 1, "gia": 12000000, "thoi_han": "1 năm", "khuyen_mai_id": 1 }
+
+Xóa Mức giá DELETE: http://localhost:3000/api/pricings/1
+
+Tạo Huấn luyện viên POST: http://localhost:3000/api/trainers { "chi_nhanh_id": 1, "ho_ten": "Trainer Hùng", "mo_ta": "5 năm kinh nghiệm", "chung_chi": "ISSA", "kinh_nghiem": 5, "hinh_anh": "https://link-to-image.com/hung.jpg" }
+
+Gán Dịch vụ cho HLV POST: http://localhost:3000/api/trainers/1/services { "dich_vu_id": 1 }
+
+Xóa Dịch vụ khỏi HLV DELETE: http://localhost:3000/api/trainers/1/services/1
+
+Tạo Dịch vụ POST: http://localhost:3000/api/services { "chi_nhanh_id": 1, "ten": "Lớp Kickboxing", "mo_ta": "Lớp học tự vệ và đốt mỡ." }
+
+Tạo FAQ POST: http://localhost:3000/api/faqs { "cau_hoi": "Giờ mở cửa là khi nào?", "cau_tra_loi": "Chúng tôi mở cửa từ 6:00 sáng đến 10:00 tối." }
+
+Tạo Mục Gallery POST: http://localhost:3000/api/gallery { "ten_de": "Banner Trang chủ", "hinh_anh": "https://link-to-image.com/banner.jpg", "mo_ta": "Banner chính" }
+
+3. HUẤN LUYỆN VIÊN (YÊU CẦU TOKEN TRAINER)
+HLV tự cập nhật hồ sơ PUT: http://localhost:3000/api/trainers/1 (Lưu ý: :id là hlv_id của HLV đó) { "ho_ten": "Trainer Hùng (Updated)", "mo_ta": "6 năm kinh nghiệm, chuyên về phục hồi.", "chung_chi": "ISSA, NASM", "kinh_nghiem": 6, "hinh_anh": "https://link-to-image.com/hung_new.jpg" }
+
+HLV xác nhận Lịch hẹn PUT: http://localhost:3000/api/bookings/1 { "trang_thai": "da xac nhan" }
+
+4. KHÁCH HÀNG (YÊU CẦU TOKEN CUSTOMER)
+Tạo Yêu cầu Thanh toán (Lấy link Momo) POST: http://localhost:3000/api/payments (Lưu ý: Đảm bảo gia_id và khach_id tồn tại) { "gia_id": 1, "khach_id": 4 }
+
+Khách hàng tạo Lịch hẹn POST: http://localhost:3000/api/bookings (Lưu ý: API tự lấy khach_id từ Token) { "hlv_id": 1, "chi_nhanh_id": 1, "dich_vu_id": 1, "thoi_gian": "2025-11-20T10:00:00Z" }
+
+Khách hàng xem Lịch sử Đặt lịch GET: http://localhost:3000/api/customers/4/bookings
+
+Khách hàng xem Lịch sử Thanh toán GET: http://localhost:3000/api/customers/4/payments
+
+5. CÔNG KHAI (PUBLIC - KHÔNG CẦN TOKEN)
+Gửi Form Liên hệ POST: http://localhost:3000/api/contacts { "ho_ten": "Khách Vãng Lai", "email": "visitor@example.com", "noi_dung": "Tôi muốn hỏi về giá tập..." }
+
+Xem tất cả Chi nhánh GET: http://localhost:3000/api/branches
+
+Xem tất cả Gói tập GET: http://localhost:3000/api/packages
+
+Xem tất cả Mức giá (đã tính KM) GET: http://localhost:3000/api/pricings
+
+Xem tất cả Khuyến mãi GET: http://localhost:3000/api/promotions
+
+Xem tất cả Huấn luyện viên GET: http://localhost:3000/api/trainers
+
+Xem HLV theo Chi nhánh GET: http://localhost:3000/api/branches/1/trainers
+
+Xem tất cả Dịch vụ GET: http://localhost:3000/api/services
+
+Xem Dịch vụ theo HLV GET: http://localhost:3000/api/trainers/1/services
+
+Xem HLV theo Dịch vụ GET: http://localhost:3000/api/services/1/trainers
+
+Xem tất cả FAQs GET: http://localhost:3000/api/faqs
+
+Xem tất cả Gallery GET: http://localhost:3000/api/gallery
+
+--- KẾT THÚC TỆP TEST API ---
