@@ -2,25 +2,28 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-// Sử dụng biến môi trường DATABASE_URL để chứa toàn bộ chuỗi URI của Supabase
-// Nếu DATABASE_URL không tồn tại, nó sẽ cố gắng đọc các biến cũ (nhưng chúng ta sẽ không dùng chúng nữa)
+// Sử dụng biến môi trường DATABASE_URL để chứa toàn bộ chuỗi URI của Supabase.
+// Nếu DATABASE_URL tồn tại (tức là trên Render), nó sẽ được sử dụng.
+// Nếu không (tức là chạy local), nó sẽ cố gắng đọc các biến cũ (nhưng cách này không khuyến nghị).
 const connectionString = process.env.DATABASE_URL ||
     `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_DATABASE}`;
 
 const pool = new Pool({
     connectionString: connectionString,
-    // BẮT BUỘC: Thêm cấu hình SSL khi kết nối với Supabase/Cloud DB
-    ssl: {
-        rejectUnauthorized: false // Cho phép kết nối ngay cả khi chứng chỉ không được chứng nhận hoàn toàn
-    }
+    // Cấu hình SSL là BẮT BUỘC khi kết nối với Supabase/Cloud DB
+    // Chúng ta bật SSL nếu không chạy trong môi trường phát triển (DEV)
+    ssl: process.env.NODE_ENV === 'production' ? {
+        // Tùy chọn này giúp kết nối ổn định hơn trên Render
+        rejectUnauthorized: false
+    } : false 
 });
 
 pool.on('error', (err, client) => {
-    console.error('Lỗi không mong muốn trên client PostgreSQL', err);
-    process.exit(1); // Thoát ứng dụng khi có lỗi nghiêm trọng
+    console.error('Lỗi nghiêm trọng trên kết nối CSDL', err);
+    process.exit(1); 
 });
 
-console.log("Đã khởi tạo Pool kết nối CSDL.");
+console.log("Đã khởi tạo Pool kết nối CSDL thành công.");
 
 module.exports = {
     query: (text, params) => pool.query(text, params),
