@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 
+
 // Thêm route mới để xử lý OTP
 router.post('/verify-otp', authController.verifyOtp);
 

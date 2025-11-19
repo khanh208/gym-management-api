@@ -1,45 +1,32 @@
 // services/emailService.js
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 require('dotenv').config();
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const sendEmail = async (to, subject, htmlContent) => {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.error('Lỗi: Chưa cấu hình EMAIL_USER hoặc EMAIL_PASS.');
+    // Kiểm tra biến môi trường
+    if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
+      console.error('Lỗi: Chưa cấu hình RESEND_API_KEY hoặc EMAIL_FROM.');
       return null;
     }
 
-    console.log(`[EmailService] Đang cố gắng kết nối SMTP tới Gmail... (User: ${process.env.EMAIL_USER})`);
+    console.log(`[EmailService] Đang gửi email qua Resend... (From: ${process.env.EMAIL_FROM} -> To: ${to})`);
 
-    const transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true, // 465 = SSL
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS, // phải là App Password
-      },
-      // Nếu muốn, có thể bỏ luôn tls:
-      // tls: { rejectUnauthorized: true },
-      connectionTimeout: 30000,
-      greetingTimeout: 30000,
-      socketTimeout: 30000,
-    });
-
-    await transporter.verify();
-
-    const mailOptions = {
-      from: `"NeoFitness Support" <${process.env.EMAIL_USER}>`,
-      to,
+    const result = await resend.emails.send({
+      from: process.env.EMAIL_FROM,  // "NeoFitness Support <no-reply@your-domain.com>"
+      to,                            // có thể là string hoặc array
       subject,
       html: htmlContent,
-    };
+    });
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log('[EmailService] Email sent:', info.response);
-    return info;
+    console.log('[EmailService] Email sent:', result);
+    return result;
   } catch (error) {
-    console.error('[EmailService] Gửi email thất bại:', error);
+    console.error('[EmailService] Gửi email thất bại:', error?.message || error);
+    // Có thể log chi tiết hơn nếu cần:
+    // console.error(error);
     return null;
   }
 };

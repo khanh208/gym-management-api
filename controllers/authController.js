@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { sendEmail } = require('../services/emailService');
 
+
 const MAX_OTP_ATTEMPTS = 3; // Số lần thử sai tối đa
 
 // --- 1. ĐĂNG KÝ (register) ---
