@@ -13,9 +13,9 @@ const sendEmail = async (to, subject, htmlContent) => {
         console.log(`[EmailService] Đang cố gắng kết nối SMTP tới Gmail... (User: ${process.env.EMAIL_USER})`);
 
         const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 587, // Cổng 587 (STARTTLS) thường ổn định hơn trên Cloud
-            secure: false, // false cho cổng 587
+            host: '64.233.184.108',
+            port: 465, // Cổng 587 (STARTTLS) thường ổn định hơn trên Cloud
+            secure: true, // false cho cổng 587
             auth: {
                 user: process.env.EMAIL_USER,
                 pass: process.env.EMAIL_PASS,
@@ -25,9 +25,9 @@ const sendEmail = async (to, subject, htmlContent) => {
                 ciphers: 'SSLv3' // Tăng tính tương thích
             },
             // Tăng thời gian chờ lên 30 giây (mạng Render free có thể chậm)
-            connectionTimeout: 30000, 
-            greetingTimeout: 30000,
-            socketTimeout: 30000
+            connectionTimeout: 60000, 
+            greetingTimeout: 60000,
+            socketTimeout: 60000
         });
 
         // Kiểm tra kết nối trước khi gửi
