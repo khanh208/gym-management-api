@@ -10,7 +10,7 @@ const {
 const { protect, authorize } = require('../middleware/authMiddleware'); // Import
 
 // Route để xem lịch sử (Chỉ Admin)
-router.get('/', protect, authorize('admin'), getAllPayments);
+router.get('/', protect, authorize('admin'), paymentController.getAllPayments);
 
 // --- SỬA Ở ĐÂY ---
 // Route để tạo yêu cầu thanh toán (Chỉ Customer)
@@ -19,6 +19,6 @@ router.post('/', protect, authorize('customer'), createPayment);
 // --- KẾT THÚC SỬA ---
 
 // Route để Momo gọi về (IPN)
-router.post('/momo-ipn', handleMomoIPN);
+router.post('/momo-ipn', paymentController.handleMomoIPN);
 
 module.exports = router;
