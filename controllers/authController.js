@@ -31,15 +31,15 @@ exports.register = async (req, res) => {
         const otp_hash = await bcrypt.hash(otp, otpSalt);
         const het_han_luc = new Date(Date.now() + 10 * 60 * 1000); // 10 phút
 
-        // 4. Gửi email OTP (Gửi trước khi ghi DB để tránh dữ liệu rác nếu gửi lỗi)
+        // 4. Gửi email OTP
         const subject = 'Mã xác thực tài khoản của bạn';
         const htmlBody = `<p>Mã OTP để kích hoạt tài khoản của bạn là: <b>${otp}</b>. Mã này có hiệu lực trong 10 phút.</p>`;
         
-        try {
-            await sendEmail(email, subject, htmlBody);
-        } catch (emailError) {
-            console.error('Lỗi gửi email đăng ký:', emailError);
-            return res.status(500).json({ message: 'Không thể gửi email xác thực. Vui lòng kiểm tra lại email của bạn.' });
+        // Gửi mail trước để kiểm tra kết nối, nếu lỗi thì dừng luôn
+        const emailInfo = await sendEmail(email, subject, htmlBody);
+
+        if (!emailInfo) {
+            return res.status(500).json({ message: 'Không thể gửi email xác thực. Vui lòng thử lại sau.' });
         }
 
         // 5. Bắt đầu Transaction để lưu dữ liệu
@@ -79,7 +79,7 @@ exports.register = async (req, res) => {
         }
 
     } catch (error) {
-        console.error(error);
+        console.error("Register Controller Error:", error);
         res.status(500).json({ message: 'Lỗi server khi đăng ký.', error: error.message });
     }
 };
@@ -145,7 +145,9 @@ exports.login = async (req, res) => {
         if (!user) {
             return res.status(401).json({ message: 'Email hoặc mật khẩu không chính xác.' });
         }
-        // Kiểm tra tài khoản đã kích hoạt chưa (Optional nhưng nên có)
+        
+        // Kiểm tra tài khoản đã kích hoạt chưa
+        // (Lưu ý: Nếu bạn muốn cho phép đăng nhập ngay sau khi đăng ký mà chưa xác thực email thì bỏ dòng này)
         if (user.trang_thai !== 'active' && !user.email_xac_thuc_at) {
              return res.status(403).json({ message: 'Tài khoản chưa được kích hoạt. Vui lòng xác thực email.' });
         }
@@ -192,9 +194,9 @@ exports.forgotPassword = async (req, res) => {
         const user = userResult.rows[0];
 
         if (!user) {
-            console.log(`[Forgot Password] Email ${email} không tồn tại. Trả về thành công giả.`);
-            // Luôn trả về thành công để bảo mật
-            return res.status(200).json({ message: 'Nếu email tồn tại, chúng tôi đã gửi mã OTP.' });
+            console.log(`[Forgot Password] Email ${email} không tồn tại.`);
+            // Luôn trả về thành công để bảo mật (tránh dò email)
+            return res.status(200).json({ message: 'Nếu email tồn tại, chúng tôi đã gửi một mã OTP.' });
         }
         
         // 2. Tạo OTP
@@ -211,22 +213,24 @@ exports.forgotPassword = async (req, res) => {
         await db.query(upsertOtpQuery, [email, otp_hash, het_han_luc]);
 
         // 4. Gửi email OTP
-        const subject = 'Mã xác thực tài khoản của bạn';
-        const htmlBody = `<p>Mã OTP... <b>${otp}</b>...</p>`; // (Giữ nguyên nội dung HTML cũ của bạn)
+        const subject = 'Yêu cầu đặt lại mật khẩu';
+        const htmlBody = `<p>Mã OTP để đặt lại mật khẩu của bạn là: <b>${otp}</b>. Vui lòng không chia sẻ mã này. Mã có hiệu lực trong 10 phút.</p>`;
         
-        // Gửi mail nhưng không await kết quả để chặn luồng, hoặc await nhưng không throw error
-        // Ở đây chúng ta await để đảm bảo gửi xong mới báo thành công
         const emailInfo = await sendEmail(email, subject, htmlBody);
 
-        if (!emailInfo) {
-            console.warn("Đăng ký thành công nhưng Gửi email thất bại.");
-            // Bạn có thể chọn:
-            // 1. Vẫn cho đăng ký thành công và báo user "Liên hệ admin để lấy OTP"
-            // 2. Hoặc Rollback (như code cũ) nếu bắt buộc phải có email.
-            
-            // Ở đây tôi đề xuất giữ nguyên logic Rollback cũ nếu bạn muốn chặt chẽ:
-            throw new Error("Không thể kết nối đến máy chủ Email (Timeout).");
+        if (emailInfo) {
+            console.log(`[Forgot Password] Đã gửi email tới ${email}.`);
+            res.status(200).json({ message: 'Nếu email tồn tại, chúng tôi đã gửi một mã OTP.' });
+        } else {
+            console.error(`[Forgot Password] GỬI EMAIL THẤT BẠI tới ${email}.`);
+            res.status(500).json({ message: 'Lỗi hệ thống khi gửi email.' });
         }
+
+    } catch (error) {
+        console.error('[Forgot Password] Lỗi server:', error);
+        res.status(500).json({ message: 'Lỗi server' });
+    }
+};
 
 // --- 5. ĐẶT LẠI MẬT KHẨU (resetPassword) ---
 exports.resetPassword = async (req, res) => {
@@ -244,7 +248,7 @@ exports.resetPassword = async (req, res) => {
         if (!verificationData) {
             return res.status(400).json({ message: 'Mã OTP không hợp lệ hoặc đã hết hạn.' });
         }
-        if (verificationData.so_lan_thu_sai >= 3) {
+        if (verificationData.so_lan_thu_sai >= MAX_OTP_ATTEMPTS) {
             return res.status(400).json({ message: 'Bạn đã nhập sai quá nhiều lần. Vui lòng yêu cầu mã mới.' });
         }
         if (new Date() > new Date(verificationData.het_han_luc)) {
