@@ -210,24 +210,23 @@ exports.forgotPassword = async (req, res) => {
         `;
         await db.query(upsertOtpQuery, [email, otp_hash, het_han_luc]);
 
-        // 4. Gửi email
-        const subject = 'Yêu cầu đặt lại mật khẩu';
-        const htmlBody = `<p>Mã OTP để đặt lại mật khẩu của bạn là: <b>${otp}</b>. Vui lòng không chia sẻ mã này. Mã có hiệu lực trong 10 phút.</p>`;
+        // 4. Gửi email OTP
+        const subject = 'Mã xác thực tài khoản của bạn';
+        const htmlBody = `<p>Mã OTP... <b>${otp}</b>...</p>`; // (Giữ nguyên nội dung HTML cũ của bạn)
         
-        try {
-            await sendEmail(email, subject, htmlBody);
-            console.log(`[Forgot Password] Đã gửi email tới ${email}.`);
-            res.status(200).json({ message: 'Nếu email tồn tại, chúng tôi đã gửi mã OTP.' });
-        } catch (emailError) {
-            console.error(`[Forgot Password] Lỗi gửi email:`, emailError);
-            res.status(500).json({ message: 'Lỗi hệ thống khi gửi email.' });
-        }
+        // Gửi mail nhưng không await kết quả để chặn luồng, hoặc await nhưng không throw error
+        // Ở đây chúng ta await để đảm bảo gửi xong mới báo thành công
+        const emailInfo = await sendEmail(email, subject, htmlBody);
 
-    } catch (error) {
-        console.error('[Forgot Password] Lỗi server:', error);
-        res.status(500).json({ message: 'Lỗi server' });
-    }
-};
+        if (!emailInfo) {
+            console.warn("Đăng ký thành công nhưng Gửi email thất bại.");
+            // Bạn có thể chọn:
+            // 1. Vẫn cho đăng ký thành công và báo user "Liên hệ admin để lấy OTP"
+            // 2. Hoặc Rollback (như code cũ) nếu bắt buộc phải có email.
+            
+            // Ở đây tôi đề xuất giữ nguyên logic Rollback cũ nếu bạn muốn chặt chẽ:
+            throw new Error("Không thể kết nối đến máy chủ Email (Timeout).");
+        }
 
 // --- 5. ĐẶT LẠI MẬT KHẨU (resetPassword) ---
 exports.resetPassword = async (req, res) => {

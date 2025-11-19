@@ -9,18 +9,19 @@ const sendEmail = async (to, subject, htmlContent) => {
             throw new Error('Chưa cấu hình EMAIL_USER hoặc EMAIL_PASS.');
         }
 
-        // Cấu hình chi tiết thay vì dùng 'service: gmail'
+        // Cấu hình sử dụng cổng 465 (SSL) thay vì 587
         const transporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
-            port: 587, // Cổng TLS (thường ổn định hơn trên Cloud)
-            secure: false, // false cho cổng 587, true cho cổng 465
+            port: 465, 
+            secure: true, // true cho cổng 465
             auth: {
                 user: process.env.EMAIL_USER,
                 pass: process.env.EMAIL_PASS,
             },
-            tls: {
-                rejectUnauthorized: false // Giúp tránh lỗi chứng chỉ SSL trên một số mạng
-            }
+            // Thêm các timeout để tránh bị treo mãi mãi
+            connectionTimeout: 10000, // 10 giây
+            greetingTimeout: 10000,
+            socketTimeout: 10000
         });
 
         const mailOptions = {
@@ -35,7 +36,9 @@ const sendEmail = async (to, subject, htmlContent) => {
         return info;
     } catch (error) {
         console.error('Lỗi gửi email:', error);
-        throw error; 
+        // Không ném lỗi ra ngoài nữa để tránh làm sập API đăng ký
+        // Chúng ta sẽ trả về false để controller biết là gửi mail thất bại nhưng vẫn đăng ký được
+        return null; 
     }
 };
 
