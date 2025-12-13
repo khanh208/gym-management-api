@@ -28,7 +28,6 @@ const getAllBookings = async (req, res) => {
 
 // --- LẤY LỊCH HẸN CỦA MỘT KHÁCH HÀNG ---
 const getBookingsByCustomer = async (req, res) => {
-    // (Lưu ý: Route này trong app.js nên được bảo vệ)
     const { customerId } = req.params; 
     
     try {
@@ -43,33 +42,45 @@ const getBookingsByCustomer = async (req, res) => {
     }
 };
 
-// --- TẠO LỊCH HẸN MỚI (ĐÃ SỬA) ---
+// --- TẠO LỊCH HẸN MỚI (ĐÃ SỬA LỖI LOGIC THỜI GIAN) ---
 const createBooking = async (req, res) => {
     const { gkh_id, dich_vu_id, chi_nhanh_id, hlv_id, thoi_gian } = req.body;
     const tai_khoan_id = req.user.user_id;
 
-    // --- SỬA LỖI Ở ĐÂY: Thêm lại các dòng khai báo thời gian ---
-    const DURATION_MINUTES = 60; // Giả định buổi tập kéo dài 60 phút
-    
+    // 1. Validate dữ liệu đầu vào cơ bản
     if (!gkh_id || !dich_vu_id || !chi_nhanh_id || !thoi_gian) {
         return res.status(400).json({ message: 'Vui lòng chọn Gói tập, Dịch vụ, Chi nhánh và Thời gian.' });
     }
 
+    // --- SỬA LỖI TẠI ĐÂY: Khai báo và tính toán thời gian TRƯỚC khi sử dụng ---
+    const bookingStartTime = new Date(thoi_gian);
+    
+    // Kiểm tra định dạng ngày tháng
+    if (isNaN(bookingStartTime.getTime())) {
+        return res.status(400).json({ message: 'Định dạng thời gian không hợp lệ.' });
+    }
+
+    // Tính toán thời gian kết thúc (Cộng thêm 60 phút)
+    const DURATION_MINUTES = 60; 
+    const bookingEndTime = new Date(bookingStartTime.getTime() + DURATION_MINUTES * 60000);
+
     const currentTime = new Date(); // Thời gian hiện tại của server
+
+    // Kiểm tra quá khứ
     if (bookingStartTime < currentTime) {
         return res.status(400).json({ message: 'Thời gian không hợp lệ. Bạn không thể đặt lịch trong quá khứ.' });
     }
-    // --- KẾT THÚC SỬA LỖI --- (Biến bookingTime giờ đã được đổi tên thành bookingStartTime)
+    // --------------------------------------------------------------------------
 
     try {
-        // 1. Lấy khach_id
+        // 2. Lấy khach_id từ tai_khoan_id
         const customerProfile = await db.query('SELECT khach_id FROM khach_hang WHERE tai_khoan_id = $1', [tai_khoan_id]);
         if (customerProfile.rows.length === 0) {
             return res.status(404).json({ message: 'Không tìm thấy hồ sơ khách hàng.' });
         }
         const khach_id = customerProfile.rows[0].khach_id;
 
-        // 2. Lấy và Kiểm tra gói tập (gkh_id)
+        // 3. Lấy và Kiểm tra gói tập (gkh_id)
         const pkgResult = await db.query(
             'SELECT * FROM goi_khach_hang WHERE gkh_id = $1 AND khach_id = $2',
             [gkh_id, khach_id]
@@ -79,24 +90,26 @@ const createBooking = async (req, res) => {
         }
         const activePackage = pkgResult.rows[0];
 
-        // 3. Kiểm tra Gói tập (Trạng thái, Ngày hết hạn, Số buổi)
+        // 4. Kiểm tra trạng thái Gói tập
         if (activePackage.trang_thai !== 'active') {
              return res.status(400).json({ message: `Đặt lịch thất bại. Gói tập này đã ${activePackage.trang_thai}.` });
         }
         
-        // Check 2: Kiểm tra ngày hết hạn (Sử dụng bookingStartTime)
+        // Check ngày hết hạn
         if (activePackage.ngay_het_han) {
             const expiryDate = new Date(activePackage.ngay_het_han);
-            if (bookingStartTime > expiryDate) { // <-- Dòng 88 của bạn (đã sửa thành bookingStartTime)
+            // So sánh ngày bắt đầu đặt lịch với ngày hết hạn
+            if (bookingStartTime > expiryDate) { 
                 return res.status(400).json({ message: `Đặt lịch thất bại. Gói tập của bạn đã hết hạn vào ngày ${expiryDate.toLocaleDateString('vi-VN')}.` });
             }
         }
         
+        // Check số buổi còn lại
         if (activePackage.tong_so_buoi !== null && activePackage.so_buoi_da_tap >= activePackage.tong_so_buoi) {
             return res.status(400).json({ message: `Đặt lịch thất bại. Bạn đã sử dụng hết ${activePackage.tong_so_buoi} buổi.` });
         }
         
-        // 4. KIỂM TRA HLV TRÙNG LỊCH (Sử dụng bookingStartTime và bookingEndTime)
+        // 5. KIỂM TRA HLV TRÙNG LỊCH (Logic Overlap)
         if (hlv_id) { 
             const conflictCheck = await db.query(
                 `SELECT 1 FROM dat_lich
@@ -110,11 +123,12 @@ const createBooking = async (req, res) => {
             }
         }
 
-        // 5. Nếu mọi thứ OK, tạo lịch hẹn (thêm thoi_gian_ket_thuc)
+        // 6. Nếu mọi thứ OK, tạo lịch hẹn
         const query = `
             INSERT INTO dat_lich (khach_id, hlv_id, chi_nhanh_id, dich_vu_id, thoi_gian, thoi_gian_ket_thuc, trang_thai, gkh_id)
             VALUES ($1, $2, $3, $4, $5, $6, 'cho xac nhan', $7) RETURNING *;
         `;
+        // bookingEndTime đã được tính toán ở trên
         const { rows } = await db.query(query, [khach_id, hlv_id || null, chi_nhanh_id, dich_vu_id, thoi_gian, bookingEndTime, gkh_id]);
         
         res.status(201).json({ message: 'Đặt lịch thành công! Vui lòng chờ xác nhận.', data: rows[0] });
@@ -150,6 +164,7 @@ const updateBookingStatus = async (req, res) => {
             return res.status(404).json({ message: 'Không tìm thấy lịch hẹn.' });
         }
 
+        // Logic bảo mật: Chỉ Trainer chính chủ mới được update lịch của mình
         if (loggedInUser.role === 'trainer') {
             const trainerProfile = await db.query('SELECT hlv_id FROM huan_luyen_vien WHERE tai_khoan_id = $1', [loggedInUser.user_id]);
             if (trainerProfile.rows.length === 0) {
@@ -163,6 +178,7 @@ const updateBookingStatus = async (req, res) => {
             }
         }
         
+        // Logic trừ buổi tập khi hoàn thành
         if (trang_thai === 'hoan thanh' && booking.trang_thai !== 'hoan thanh') {
             if (booking.gkh_id) { 
                 const pkgResult = await db.query('SELECT * FROM goi_khach_hang WHERE gkh_id = $1 FOR UPDATE', [booking.gkh_id]);
