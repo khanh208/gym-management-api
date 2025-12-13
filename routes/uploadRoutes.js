@@ -26,7 +26,7 @@ const storage = multer.diskStorage({
 // 3. Bộ lọc chỉ chấp nhận ảnh
 const upload = multer({ 
     storage: storage,
-    limits: { fileSize: 5 * 1024 * 1024 }, // Giới hạn 5MB
+    limits: { fileSize: 10 * 1024 * 1024 }, // Giới hạn 5MB
     fileFilter: function (req, file, cb) {
         const filetypes = /jpeg|jpg|png|webp|gif/;
         const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
@@ -38,6 +38,8 @@ const upload = multer({
         }
     }
 });
+
+
 
 // 4. API Upload
 router.post('/', upload.single('image'), (req, res) => {
