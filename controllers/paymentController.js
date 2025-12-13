@@ -5,10 +5,9 @@ const crypto = require('crypto');
 
 /**
  * Tạo thanh toán MoMo
- * Body: { gia_id, ngay_kich_hoat }
+ * Body: { gia_id, ngay_kich_hoat, ho_ten, so_dien_thoai }
  */
 const createPayment = async (req, res) => {
-    // 1. Nhận thêm ho_ten và so_dien_thoai từ body
     const { gia_id, ngay_kich_hoat, ho_ten, so_dien_thoai } = req.body; 
     const tai_khoan_id = req.user.user_id; 
 
@@ -16,13 +15,35 @@ const createPayment = async (req, res) => {
     if (!gia_id || !ngay_kich_hoat) {
         return res.status(400).json({ message: 'Thiếu thông tin gói hoặc ngày kích hoạt.' });
     }
-    if (new Date(ngay_kich_hoat) < new Date().setHours(0, 0, 0, 0)) {
-         return res.status(400).json({ message: 'Ngày kích hoạt không thể là quá khứ.' });
+
+    // Fix: Parse ngày kích hoạt với timezone +7
+    let activationDateInput;
+    try {
+        if (typeof ngay_kich_hoat === 'string') {
+            // Nếu không có timezone, thêm +07:00
+            const dateStr = ngay_kich_hoat.includes('T') ? ngay_kich_hoat : `${ngay_kich_hoat}T00:00:00`;
+            activationDateInput = dateStr.includes('Z') || dateStr.includes('+') 
+                ? new Date(dateStr) 
+                : new Date(dateStr + '+07:00');
+        } else {
+            activationDateInput = new Date(ngay_kich_hoat);
+        }
+    } catch (error) {
+        return res.status(400).json({ message: 'Định dạng ngày kích hoạt không hợp lệ.' });
+    }
+
+    // Kiểm tra ngày kích hoạt không được trong quá khứ (so sánh theo ngày, không tính giờ)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const activationDay = new Date(activationDateInput);
+    activationDay.setHours(0, 0, 0, 0);
+    
+    if (activationDay < today) {
+        return res.status(400).json({ message: 'Ngày kích hoạt không thể là quá khứ.' });
     }
 
     try {
-        // 2. CẬP NHẬT THÔNG TIN KHÁCH HÀNG (QUAN TRỌNG)
-        // Nếu khách hàng gửi thông tin mới lên, update ngay vào bảng khach_hang
+        // Cập nhật thông tin khách hàng nếu có
         if (ho_ten || so_dien_thoai) {
             await db.query(
                 `UPDATE khach_hang 
@@ -33,7 +54,7 @@ const createPayment = async (req, res) => {
             );
         }
 
-        // 3. Lấy khach_id (Giữ nguyên logic cũ)
+        // Lấy khach_id
         const customerProfile = await db.query(
             'SELECT khach_id FROM khach_hang WHERE tai_khoan_id = $1',
             [tai_khoan_id]
@@ -43,7 +64,7 @@ const createPayment = async (req, res) => {
         }
         const khach_id = customerProfile.rows[0].khach_id;
 
-        // --- LẤY GIÁ VÀ TÍNH TOÁN KHUYẾN MÃI ---
+        // Lấy giá và tính toán khuyến mãi
         const priceQuery = `
             SELECT ggt.gia, km.giam_gia_phantram, km.ngay_bat_dau, km.ngay_ket_thuc
             FROM gia_goi_tap ggt
@@ -69,9 +90,8 @@ const createPayment = async (req, res) => {
             finalPrice = giaGoc * (1 - discount / 100);
         }
         const amount = Math.round(finalPrice);
-        // --- KẾT THÚC TÍNH GIÁ ---
 
-        // 4) Chuẩn bị thông tin Momo
+        // Chuẩn bị thông tin MoMo
         const partnerCode = process.env.MOMO_PARTNER_CODE;
         const accessKey   = process.env.MOMO_ACCESS_KEY;
         const secretKey   = process.env.MOMO_SECRET_KEY;
@@ -81,15 +101,20 @@ const createPayment = async (req, res) => {
         const redirectUrl = 'https://gym-frontend-six-rosy.vercel.app/payment-success';
         const ipnUrl      = `${process.env.PUBLIC_URL}/api/payments/momo-ipn`;
         const requestType = 'captureWallet';
-        // Gửi cả khach_id, gia_id, và ngay_kich_hoat
-        const extraData   = Buffer.from(JSON.stringify({ khach_id, gia_id, ngay_kich_hoat }), 'utf8').toString('base64');
-        const lang        = 'vi';
+        
+        // Lưu ngày kích hoạt dạng ISO string để tránh lỗi timezone
+        const extraData = Buffer.from(JSON.stringify({ 
+            khach_id, 
+            gia_id, 
+            ngay_kich_hoat: activationDateInput.toISOString() 
+        }), 'utf8').toString('base64');
+        const lang = 'vi';
 
-        // 5) rawSignature
+        // rawSignature
         const rawSignature = `accessKey=${accessKey}&amount=${amount}&extraData=${extraData}&ipnUrl=${ipnUrl}&orderId=${orderId}&orderInfo=${orderInfo}&partnerCode=${partnerCode}&redirectUrl=${redirectUrl}&requestId=${requestId}&requestType=${requestType}`;
         const signature = crypto.createHmac('sha256', secretKey).update(rawSignature).digest('hex');
 
-        // 6) Body gọi MoMo
+        // Body gọi MoMo
         const requestBody = {
             partnerCode, partnerName: 'Test Partner', storeId: 'NeoFitness',
             requestId, amount: String(amount), orderId, orderInfo,
@@ -97,7 +122,7 @@ const createPayment = async (req, res) => {
             autoCapture: true,
         };
         
-        // 7) Gọi API MoMo
+        // Gọi API MoMo
         const momoRes = await axios.post(
             'https://test-payment.momo.vn/v2/gateway/api/create',
             requestBody,
@@ -132,8 +157,9 @@ const handleMomoIPN = async (req, res) => {
         const decoded = JSON.parse(Buffer.from(extraData, 'base64').toString('utf8') || '{}');
         khach_id = decoded.khach_id;
         gia_id = decoded.gia_id;
-        ngay_kich_hoat = decoded.ngay_kich_hoat; // Lấy ngày kích hoạt
-        if (!khach_id || !gia_id || !ngay_kich_hoat) { // Kiểm tra
+        ngay_kich_hoat = decoded.ngay_kich_hoat;
+        
+        if (!khach_id || !gia_id || !ngay_kich_hoat) {
             throw new Error('Thiếu khach_id, gia_id, hoặc ngay_kich_hoat trong extraData');
         }
     } catch (e) {
@@ -162,10 +188,15 @@ const handleMomoIPN = async (req, res) => {
             );
             const tt_id = insertPaymentResult.rows[0].tt_id;
 
-            // 3. Logic xếp hàng và kích hoạt
-            let newPackageStatus = 'pending';
-            let activationDate = new Date(ngay_kich_hoat);
+            // 3. XỬ LÝ NGÀY KÍCH HOẠT (FIX CHÍNH TẠI ĐÂY)
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // Reset về 00:00:00 để so sánh ngày
             
+            // Parse ngày kích hoạt từ extraData
+            let activationDate = new Date(ngay_kich_hoat);
+            activationDate.setHours(0, 0, 0, 0); // Reset về 00:00:00
+            
+            // Kiểm tra xem có gói đang active không
             const activeCheck = await db.query(
                 `SELECT ngay_het_han FROM goi_khach_hang 
                  WHERE khach_id = $1 AND trang_thai = 'active' AND ngay_het_han IS NOT NULL
@@ -173,28 +204,50 @@ const handleMomoIPN = async (req, res) => {
                 [khach_id]
             );
 
+            let newPackageStatus = 'pending'; // Mặc định là pending
+            
+            // CASE 1: Có gói active hiện tại
             if (activeCheck.rows.length > 0) {
                 const lastExpiryDate = new Date(activeCheck.rows[0].ngay_het_han);
+                lastExpiryDate.setHours(0, 0, 0, 0);
+                
+                // Nếu ngày kích hoạt mong muốn <= ngày hết hạn của gói hiện tại
+                // => Tự động dời sang ngày tiếp theo của gói cũ
                 if (activationDate <= lastExpiryDate) { 
-                    activationDate = new Date(lastExpiryDate.setDate(lastExpiryDate.getDate() + 1));
-                    console.log(`[MoMo IPN] Gói bị trùng, tự động dời ngày kích hoạt sang: ${activationDate}`);
+                    activationDate = new Date(lastExpiryDate);
+                    activationDate.setDate(activationDate.getDate() + 1); // +1 ngày
+                    console.log(`[MoMo IPN] Gói bị trùng, tự động dời ngày kích hoạt sang: ${activationDate.toISOString()}`);
                 }
-            } else {
-                if (activationDate <= new Date()) {
-                    activationDate = new Date();
+                // Gói mới sẽ pending cho đến khi đến ngày kích hoạt
+                newPackageStatus = 'pending';
+            } 
+            // CASE 2: Không có gói active
+            else {
+                // Nếu ngày kích hoạt <= hôm nay => Kích hoạt ngay
+                if (activationDate <= today) {
+                    activationDate = new Date(); // Set về thời điểm hiện tại
                     newPackageStatus = 'active';
+                    console.log(`[MoMo IPN] Không có gói active, kích hoạt ngay lập tức.`);
+                } 
+                // Nếu ngày kích hoạt > hôm nay => Giữ pending
+                else {
+                    newPackageStatus = 'pending';
+                    console.log(`[MoMo IPN] Gói sẽ pending đến ngày: ${activationDate.toISOString()}`);
                 }
             }
             
-            // 4. Tính toán ngày hết hạn
+            // 4. Tính toán ngày hết hạn dựa trên thoi_han
             let ngay_het_han = null;
             let tong_so_buoi = ca_buoi;
+            
             if (thoi_han) {
                 const parts = thoi_han.toLowerCase().split(' ');
                 const value = parseInt(parts[0]);
                 const unit = parts[1];
+                
                 if (!isNaN(value)) {
                     ngay_het_han = new Date(activationDate);
+                    
                     if (unit.includes('thang') || unit.includes('tháng')) {
                         ngay_het_han.setMonth(ngay_het_han.getMonth() + value);
                     } else if (unit.includes('nam') || unit.includes('năm')) {
@@ -203,6 +256,12 @@ const handleMomoIPN = async (req, res) => {
                         ngay_het_han.setDate(ngay_het_han.getDate() + value);
                     } else {
                         ngay_het_han = null;
+                    }
+                    
+                    // Trừ đi 1 ngày để đúng logic (VD: 1 tháng = từ ngày 1 đến 30, không phải đến 31)
+                    if (ngay_het_han) {
+                        ngay_het_han.setDate(ngay_het_han.getDate() - 1);
+                        ngay_het_han.setHours(23, 59, 59, 999); // Hết hạn vào cuối ngày
                     }
                 }
             }
@@ -218,16 +277,20 @@ const handleMomoIPN = async (req, res) => {
             );
 
             await db.query('COMMIT');
-            console.log(`[MoMo IPN] Thanh toán thành công, đã lưu vào thanh_toan và goi_khach_hang. OrderID: ${orderId}`);
+            console.log(`[MoMo IPN] ✅ Thanh toán thành công! OrderID: ${orderId}`);
+            console.log(`   - Trạng thái: ${newPackageStatus}`);
+            console.log(`   - Ngày kích hoạt: ${activationDate.toISOString()}`);
+            console.log(`   - Ngày hết hạn: ${ngay_het_han ? ngay_het_han.toISOString() : 'Không có'}`);
+            
             return res.status(204).send();
 
         } catch (error) {
             await db.query('ROLLBACK');
-            console.error('[MoMo IPN] Lỗi xử lý IPN (Database):', error);
+            console.error('[MoMo IPN] ❌ Lỗi xử lý IPN (Database):', error);
             return res.status(500).send('Error processing IPN');
         }
     } else {
-        console.warn(`[MoMo IPN] Thanh toán thất bại. OrderID: ${orderId}, ResultCode: ${resultCode}, Message: ${message}`);
+        console.warn(`[MoMo IPN] ⚠️ Thanh toán thất bại. OrderID: ${orderId}, ResultCode: ${resultCode}, Message: ${message}`);
         return res.status(204).send();
     }
 };
@@ -239,10 +302,10 @@ const getAllPayments = async (req, res) => {
             SELECT 
                 tt.*, 
                 kh.ho_ten AS ten_khach_hang, 
-                g.ten AS ten_goi_tap -- Sửa: Lấy tên từ bảng goi_tap
+                g.ten AS ten_goi_tap
             FROM thanh_toan tt
             JOIN khach_hang kh ON tt.khach_id = kh.khach_id
-            JOIN goi_tap g ON tt.goi_tap_id = g.goi_tap_id -- Sửa: JOIN với goi_tap
+            JOIN goi_tap g ON tt.goi_tap_id = g.goi_tap_id
             ORDER BY tt.ngay_tt DESC
         `;
         const { rows } = await db.query(query);
@@ -277,7 +340,6 @@ const getPaymentsByCustomer = async (req, res) => {
     }
 };
 
-// --- EXPORT ---
 module.exports = {
     createPayment,
     handleMomoIPN,
