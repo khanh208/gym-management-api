@@ -49,7 +49,54 @@ const getCustomerCheckInInfo = async (req, res) => {
         res.status(500).json({ message: 'Lỗi server', error: error.message });
     }
 };
+    const createWalkInTicket = async (req, res) => {
+    // 1. Lấy dữ liệu
+    const { ho_ten, so_dien_thoai, chi_nhanh_id, dich_vu_id, so_tien, phuong_thuc_tt } = req.body;
+
+    // Validation cơ bản
+    if (!ho_ten || !dich_vu_id || !chi_nhanh_id) {
+        return res.status(400).json({ message: 'Thiếu thông tin bắt buộc (Tên, Dịch vụ, Chi nhánh).' });
+    }
+
+    try {
+        // Bắt đầu transaction (theo phong cách dự án của bạn)
+        await db.query('BEGIN');
+
+        // 2. Tìm hoặc Tạo khách hàng mới
+        let khach_id;
+        const checkKhach = await db.query('SELECT khach_id FROM khach_hang WHERE so_dien_thoai = $1', [so_dien_thoai]);
+        
+        if (checkKhach.rows.length > 0) {
+            khach_id = checkKhach.rows[0].khach_id;
+        } else {
+            // Tạo khách mới (loại vãng lai)
+            const newGuest = await db.query(
+                `INSERT INTO khach_hang (ho_ten, so_dien_thoai, loai_thanh_vien, mat_khau) 
+                 VALUES ($1, $2, 'vang_lai', 'guest123') RETURNING khach_id`,
+                [ho_ten, so_dien_thoai || null]
+            );
+            khach_id = newGuest.rows[0].khach_id;
+        }
+
+        // 3. Ghi nhận Check-in
+        await db.query(
+            `INSERT INTO check_in (khach_id, chi_nhanh_id, dich_vu_id, thoi_gian_vao, trang_thai, loai_hinh)
+             VALUES ($1, $2, $3, NOW(), 'dang_tap', 've_le')`,
+            [khach_id, chi_nhanh_id, dich_vu_id]
+        );
+
+        // Hoàn tất
+        await db.query('COMMIT');
+        res.status(200).json({ message: 'Tạo vé & Check-in thành công!', khach_id: khach_id });
+
+    } catch (error) {
+        await db.query('ROLLBACK');
+        console.error("Lỗi khi tạo vé vãng lai:", error);
+        res.status(500).json({ message: 'Lỗi server', error: error.message });
+    }
+};
 
 module.exports = {
-    getCustomerCheckInInfo
+    getCustomerCheckInInfo,
+    createWalkInTicket
 };

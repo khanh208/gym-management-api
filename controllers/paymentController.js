@@ -8,24 +8,38 @@ const crypto = require('crypto');
  * Body: { gia_id, ngay_kich_hoat }
  */
 const createPayment = async (req, res) => {
-    const { gia_id, ngay_kich_hoat } = req.body; 
+    // 1. Nhận thêm ho_ten và so_dien_thoai từ body
+    const { gia_id, ngay_kich_hoat, ho_ten, so_dien_thoai } = req.body; 
     const tai_khoan_id = req.user.user_id; 
 
+    // Validate cơ bản
     if (!gia_id || !ngay_kich_hoat) {
-        return res.status(400).json({ message: 'Vui lòng cung cấp ID gói giá và Ngày mong muốn kích hoạt.' });
+        return res.status(400).json({ message: 'Thiếu thông tin gói hoặc ngày kích hoạt.' });
     }
     if (new Date(ngay_kich_hoat) < new Date().setHours(0, 0, 0, 0)) {
-         return res.status(400).json({ message: 'Ngày kích hoạt không thể là một ngày trong quá khứ.' });
+         return res.status(400).json({ message: 'Ngày kích hoạt không thể là quá khứ.' });
     }
 
     try {
-        // --- TÌM khach_id TỪ tai_khoan_id ---
+        // 2. CẬP NHẬT THÔNG TIN KHÁCH HÀNG (QUAN TRỌNG)
+        // Nếu khách hàng gửi thông tin mới lên, update ngay vào bảng khach_hang
+        if (ho_ten || so_dien_thoai) {
+            await db.query(
+                `UPDATE khach_hang 
+                 SET ho_ten = COALESCE($1, ho_ten), 
+                     so_dien_thoai = COALESCE($2, so_dien_thoai)
+                 WHERE tai_khoan_id = $3`,
+                [ho_ten, so_dien_thoai, tai_khoan_id]
+            );
+        }
+
+        // 3. Lấy khach_id (Giữ nguyên logic cũ)
         const customerProfile = await db.query(
             'SELECT khach_id FROM khach_hang WHERE tai_khoan_id = $1',
             [tai_khoan_id]
         );
         if (customerProfile.rows.length === 0) {
-            return res.status(404).json({ message: 'Không tìm thấy hồ sơ khách hàng cho tài khoản này.' });
+            return res.status(404).json({ message: 'Không tìm thấy hồ sơ khách hàng.' });
         }
         const khach_id = customerProfile.rows[0].khach_id;
 

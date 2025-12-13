@@ -55,8 +55,10 @@ const createBooking = async (req, res) => {
         return res.status(400).json({ message: 'Vui lòng chọn Gói tập, Dịch vụ, Chi nhánh và Thời gian.' });
     }
 
-    const bookingStartTime = new Date(thoi_gian);
-    const bookingEndTime = new Date(bookingStartTime.getTime() + DURATION_MINUTES * 60000);
+    const currentTime = new Date(); // Thời gian hiện tại của server
+    if (bookingStartTime < currentTime) {
+        return res.status(400).json({ message: 'Thời gian không hợp lệ. Bạn không thể đặt lịch trong quá khứ.' });
+    }
     // --- KẾT THÚC SỬA LỖI --- (Biến bookingTime giờ đã được đổi tên thành bookingStartTime)
 
     try {
