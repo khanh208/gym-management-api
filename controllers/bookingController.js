@@ -1,6 +1,26 @@
 // controllers/bookingController.js
 const db = require('../config/db');
 
+// Helper function: Chuyển đổi sang múi giờ +7
+const toVietnamTime = (date) => {
+    if (!date) return null;
+    const d = new Date(date);
+    // Chuyển sang múi giờ +7 (Vietnam)
+    return new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+};
+
+// Helper function: Format dữ liệu trả về với múi giờ +7
+const formatBookingResponse = (booking) => {
+    if (!booking) return booking;
+    
+    return {
+        ...booking,
+        thoi_gian: booking.thoi_gian ? new Date(booking.thoi_gian).toLocaleString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).replace(' ', 'T') : null,
+        thoi_gian_ket_thuc: booking.thoi_gian_ket_thuc ? new Date(booking.thoi_gian_ket_thuc).toLocaleString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).replace(' ', 'T') : null,
+        ngay_tao: booking.ngay_tao ? new Date(booking.ngay_tao).toLocaleString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).replace(' ', 'T') : null,
+    };
+};
+
 // --- LẤY TẤT CẢ LỊCH HẸN (Cho Admin) ---
 const getAllBookings = async (req, res) => {
     try {
@@ -19,7 +39,11 @@ const getAllBookings = async (req, res) => {
             ORDER BY dl.thoi_gian DESC
         `;
         const { rows } = await db.query(query);
-        res.status(200).json(rows);
+        
+        // Format tất cả các booking về múi giờ +7
+        const formattedRows = rows.map(formatBookingResponse);
+        
+        res.status(200).json(formattedRows);
     } catch (error) {
         console.error("Lỗi khi lấy tất cả lịch hẹn:", error);
         res.status(500).json({ message: 'Lỗi server', error: error.message });
@@ -35,9 +59,13 @@ const getBookingsByCustomer = async (req, res) => {
             'SELECT * FROM dat_lich WHERE khach_id = $1 ORDER BY thoi_gian DESC',
             [customerId]
         );
-        res.status(200).json(rows);
+        
+        // Format về múi giờ +7
+        const formattedRows = rows.map(formatBookingResponse);
+        
+        res.status(200).json(formattedRows);
     } catch (error) {
-         console.error("Lỗi khi lấy lịch hẹn của khách hàng:", error);
+        console.error("Lỗi khi lấy lịch hẹn của khách hàng:", error);
         res.status(500).json({ message: 'Lỗi server', error: error.message });
     }
 };
@@ -52,29 +80,36 @@ const createBooking = async (req, res) => {
     }
 
     // --- 1. XỬ LÝ MÚI GIỜ (AUTO FIX TIMEZONE) ---
-    let timeString = thoi_gian;
-    // Nếu chuỗi thời gian chưa có múi giờ (Z hoặc +), mặc định ép về +07:00 (Vietnam Time)
-    if (!timeString.includes('Z') && !timeString.includes('+')) {
-        timeString += '+07:00'; 
-    }
-    const bookingStartTime = new Date(timeString);
+    let bookingStartTime;
+    
+    try {
+        // Nếu client gửi thời gian dạng ISO string không có timezone
+        if (typeof thoi_gian === 'string' && !thoi_gian.includes('Z') && !thoi_gian.includes('+')) {
+            // Coi như đây là giờ VN, chuyển sang UTC để lưu DB
+            bookingStartTime = new Date(thoi_gian + '+07:00');
+        } else {
+            // Nếu đã có timezone, parse bình thường
+            bookingStartTime = new Date(thoi_gian);
+        }
 
-    // Kiểm tra hợp lệ
-    if (isNaN(bookingStartTime.getTime())) {
+        // Kiểm tra hợp lệ
+        if (isNaN(bookingStartTime.getTime())) {
+            return res.status(400).json({ message: 'Định dạng thời gian không hợp lệ.' });
+        }
+    } catch (error) {
         return res.status(400).json({ message: 'Định dạng thời gian không hợp lệ.' });
     }
 
     // --- 2. LOGIC VÙNG ĐỆM (BUFFER TIME) ---
     const now = new Date();
-    // Cho phép trễ tối đa 5 phút (để tránh việc người dùng bấm chậm 1-2s bị báo lỗi quá khứ)
     const bufferTime = new Date(now.getTime() - 5 * 60000); 
 
     if (bookingStartTime < bufferTime) {
-         return res.status(400).json({ message: 'Thời gian không hợp lệ. Bạn không thể đặt lịch trong quá khứ.' });
+        return res.status(400).json({ message: 'Thời gian không hợp lệ. Bạn không thể đặt lịch trong quá khứ.' });
     }
 
     // --- 3. TÍNH THỜI GIAN KẾT THÚC ---
-    const DURATION_MINUTES = 60; // Mặc định 1 buổi tập 60 phút
+    const DURATION_MINUTES = 60;
     const bookingEndTime = new Date(bookingStartTime.getTime() + DURATION_MINUTES * 60000);
 
     try {
@@ -97,7 +132,7 @@ const createBooking = async (req, res) => {
 
         // Check trạng thái gói
         if (activePackage.trang_thai !== 'active') {
-             return res.status(400).json({ message: `Đặt lịch thất bại. Gói tập này đã ${activePackage.trang_thai}.` });
+            return res.status(400).json({ message: `Đặt lịch thất bại. Gói tập này đã ${activePackage.trang_thai}.` });
         }
         
         // Check ngày hết hạn
@@ -127,14 +162,20 @@ const createBooking = async (req, res) => {
             }
         }
 
-        // Tạo lịch hẹn
+        // Tạo lịch hẹn - PostgreSQL sẽ lưu dưới dạng UTC
         const query = `
             INSERT INTO dat_lich (khach_id, hlv_id, chi_nhanh_id, dich_vu_id, thoi_gian, thoi_gian_ket_thuc, trang_thai, gkh_id)
             VALUES ($1, $2, $3, $4, $5, $6, 'cho xac nhan', $7) RETURNING *;
         `;
         const { rows } = await db.query(query, [khach_id, hlv_id || null, chi_nhanh_id, dich_vu_id, bookingStartTime, bookingEndTime, gkh_id]);
         
-        res.status(201).json({ message: 'Đặt lịch thành công! Vui lòng chờ xác nhận.', data: rows[0] });
+        // Format response về múi giờ +7
+        const formattedBooking = formatBookingResponse(rows[0]);
+        
+        res.status(201).json({ 
+            message: 'Đặt lịch thành công! Vui lòng chờ xác nhận.', 
+            data: formattedBooking 
+        });
 
     } catch (error) {
         console.error("Lỗi khi tạo lịch hẹn:", error);
@@ -163,19 +204,19 @@ const updateBookingStatus = async (req, res) => {
         const booking = bookingResult.rows[0];
 
         if (!booking) {
-            await transaction.query('ROLLBACK');
+            await db.query('ROLLBACK');
             return res.status(404).json({ message: 'Không tìm thấy lịch hẹn.' });
         }
 
         if (loggedInUser.role === 'trainer') {
             const trainerProfile = await db.query('SELECT hlv_id FROM huan_luyen_vien WHERE tai_khoan_id = $1', [loggedInUser.user_id]);
             if (trainerProfile.rows.length === 0) {
-                await transaction.query('ROLLBACK');
+                await db.query('ROLLBACK');
                 return res.status(404).json({ message: 'Không tìm thấy hồ sơ HLV cho tài khoản này.' });
             }
             const hlv_id_cua_trainer = trainerProfile.rows[0].hlv_id;
             if (booking.hlv_id != hlv_id_cua_trainer) {
-                await transaction.query('ROLLBACK');
+                await db.query('ROLLBACK');
                 return res.status(403).json({ message: 'Cấm! Bạn không có quyền cập nhật lịch hẹn của HLV khác.' });
             }
         }
@@ -207,8 +248,15 @@ const updateBookingStatus = async (req, res) => {
             [trang_thai, lichIdToUpdate]
         );
         
-        await db.query('COMMIT'); 
-        res.status(200).json({ message: `Cập nhật trạng thái lịch hẹn thành ${trang_thai} thành công!`, data: rows[0] });
+        await db.query('COMMIT');
+        
+        // Format response về múi giờ +7
+        const formattedBooking = formatBookingResponse(rows[0]);
+        
+        res.status(200).json({ 
+            message: `Cập nhật trạng thái lịch hẹn thành ${trang_thai} thành công!`, 
+            data: formattedBooking 
+        });
 
     } catch (error) {
         await db.query('ROLLBACK'); 
@@ -242,7 +290,11 @@ const getMyBookings = async (req, res) => {
             ORDER BY dl.thoi_gian DESC
         `;
         const { rows } = await db.query(query, [hlv_id]);
-        res.status(200).json(rows);
+        
+        // Format về múi giờ +7
+        const formattedRows = rows.map(formatBookingResponse);
+        
+        res.status(200).json(formattedRows);
 
     } catch (error) {
         console.error("Lỗi khi lấy lịch hẹn của HLV:", error);
