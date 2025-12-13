@@ -89,7 +89,7 @@ const createWalkInTicket = async (req, res) => {
 
         // Nếu chưa có (hoặc không nhập SĐT) thì tạo mới
         if (!khach_id) {
-            // SỬA LỖI TẠI ĐÂY: Bỏ trường loai_thanh_vien và mat_khau
+            // Fix lỗi: Chỉ insert các trường có trong database
             const newGuest = await db.query(
                 `INSERT INTO khach_hang (ho_ten, so_dien_thoai) 
                  VALUES ($1, $2) RETURNING khach_id`,
@@ -114,6 +114,9 @@ const createWalkInTicket = async (req, res) => {
         res.status(500).json({ message: 'Lỗi server', error: error.message });
     }
 };
+
+// @desc    Lấy lịch sử check-in
+// @route   GET /api/check-in/history
 const getCheckInHistory = async (req, res) => {
     try {
         const query = `
@@ -142,6 +145,6 @@ const getCheckInHistory = async (req, res) => {
 
 module.exports = {
     getCustomerCheckInInfo,
-    getCheckInHistory,
-    createWalkInTicket
+    createWalkInTicket,
+    getCheckInHistory
 };
