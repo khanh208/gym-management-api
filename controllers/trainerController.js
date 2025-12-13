@@ -1,13 +1,15 @@
 // controllers/trainerController.js
 const db = require('../config/db');
+const bcrypt = require('bcryptjs'); // Cần thêm thư viện này để mã hóa mật khẩu
 
 // --- LẤY TẤT CẢ HLV (kèm tên chi nhánh nếu có) ---
 const getAllTrainers = async (req, res) => {
     try {
         const query = `
-            SELECT hlv.*, cn.ten_chi_nhanh 
+            SELECT hlv.*, cn.ten_chi_nhanh, tk.email
             FROM huan_luyen_vien hlv
             LEFT JOIN chi_nhanh cn ON hlv.chi_nhanh_id = cn.chi_nhanh_id
+            LEFT JOIN tai_khoan tk ON hlv.tai_khoan_id = tk.user_id
             ORDER BY hlv.hlv_id ASC
         `;
         const { rows } = await db.query(query);
@@ -22,7 +24,13 @@ const getAllTrainers = async (req, res) => {
 const getTrainerById = async (req, res) => {
     const { id } = req.params;
     try {
-        const { rows } = await db.query('SELECT * FROM huan_luyen_vien WHERE hlv_id = $1', [id]);
+        const { rows } = await db.query(`
+            SELECT hlv.*, tk.email 
+            FROM huan_luyen_vien hlv
+            LEFT JOIN tai_khoan tk ON hlv.tai_khoan_id = tk.user_id
+            WHERE hlv.hlv_id = $1
+        `, [id]);
+        
         if (rows.length === 0) {
             return res.status(404).json({ message: 'Không tìm thấy huấn luyện viên.' });
         }
@@ -45,22 +53,60 @@ const getTrainersByBranch = async (req, res) => {
     }
 };
 
-// --- TẠO MỚI HLV ---
+// --- TẠO MỚI HLV (VÀ TẠO TÀI KHOẢN) ---
 const createTrainer = async (req, res) => {
-    const { chi_nhanh_id, ho_ten, mo_ta, chung_chi, kinh_nghiem, hinh_anh } = req.body;
-    if (!ho_ten) {
-        return res.status(400).json({ message: 'Họ tên HLV là bắt buộc.' });
+    // Nhận thêm email và password từ Body
+    const { chi_nhanh_id, ho_ten, mo_ta, chung_chi, kinh_nghiem, hinh_anh, email, password } = req.body;
+
+    // Validate dữ liệu đầu vào
+    if (!ho_ten || !email || !password) {
+        return res.status(400).json({ message: 'Vui lòng nhập đầy đủ Họ tên, Email và Mật khẩu cho HLV.' });
     }
+
     try {
-        const query = `
-            INSERT INTO huan_luyen_vien (chi_nhanh_id, ho_ten, mo_ta, chung_chi, kinh_nghiem, hinh_anh)
-            VALUES ($1, $2, $3, $4, $5, $6) RETURNING *;
+        // Bắt đầu Transaction
+        await db.query('BEGIN');
+
+        // 1. Kiểm tra Email đã tồn tại chưa
+        const userExists = await db.query('SELECT * FROM tai_khoan WHERE email = $1', [email]);
+        if (userExists.rows.length > 0) {
+            await db.query('ROLLBACK');
+            return res.status(409).json({ message: 'Email này đã được sử dụng.' });
+        }
+
+        // 2. Mã hóa mật khẩu
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // 3. Tạo Tài khoản (bảng tai_khoan)
+        // Mặc định role là 'trainer' và trang_thai là 'active'
+        const accountQuery = `
+            INSERT INTO tai_khoan (ho_ten, email, mat_khau_hash, role, trang_thai, email_xac_thuc_at) 
+            VALUES ($1, $2, $3, 'trainer', 'active', NOW()) 
+            RETURNING user_id;
         `;
-        // Đảm bảo chi_nhanh_id là null nếu không được cung cấp hoặc rỗng
-        const params = [chi_nhanh_id || null, ho_ten, mo_ta, chung_chi, kinh_nghiem || 0, hinh_anh];
-        const { rows } = await db.query(query, params);
-        res.status(201).json({ message: 'Thêm HLV thành công!', data: rows[0] });
+        const accountResult = await db.query(accountQuery, [ho_ten, email, hashedPassword]);
+        const newUserId = accountResult.rows[0].user_id;
+
+        // 4. Tạo Hồ sơ HLV (bảng huan_luyen_vien) có liên kết tai_khoan_id
+        const trainerQuery = `
+            INSERT INTO huan_luyen_vien (chi_nhanh_id, tai_khoan_id, ho_ten, mo_ta, chung_chi, kinh_nghiem, hinh_anh)
+            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *;
+        `;
+        const params = [chi_nhanh_id || null, newUserId, ho_ten, mo_ta, chung_chi, kinh_nghiem || 0, hinh_anh];
+        const trainerResult = await db.query(trainerQuery, params);
+
+        // Commit Transaction (Lưu tất cả)
+        await db.query('COMMIT');
+
+        res.status(201).json({ 
+            message: 'Tạo HLV và tài khoản thành công!', 
+            data: trainerResult.rows[0],
+            account: { email: email, user_id: newUserId }
+        });
+
     } catch (error) {
+        await db.query('ROLLBACK'); // Hủy thao tác nếu có lỗi
         console.error("Lỗi khi tạo HLV:", error);
         res.status(500).json({ message: 'Lỗi server', error: error.message });
     }
@@ -78,7 +124,6 @@ const updateTrainer = async (req, res) => {
 
         if (loggedInUser.role === 'admin') {
             // == LOGIC ADMIN ==
-            console.log(`[Admin Update] Admin ${loggedInUser.email} đang cập nhật HLV ID: ${hlvIdToUpdate}`);
             query = `
                 UPDATE huan_luyen_vien
                 SET chi_nhanh_id = $1, ho_ten = $2, mo_ta = $3, chung_chi = $4, kinh_nghiem = $5, hinh_anh = $6, trang_thai = $7
@@ -89,7 +134,6 @@ const updateTrainer = async (req, res) => {
 
         } else if (loggedInUser.role === 'trainer') {
             // == LOGIC TRAINER ==
-            console.log(`[Trainer Update] Trainer ${loggedInUser.email} đang cập nhật hồ sơ.`);
             const trainerProfile = await db.query('SELECT tai_khoan_id FROM huan_luyen_vien WHERE hlv_id = $1', [hlvIdToUpdate]);
 
             if (trainerProfile.rows.length === 0) {
@@ -113,7 +157,6 @@ const updateTrainer = async (req, res) => {
         // Chạy query
         const { rows } = await db.query(query, params);
         if (rows.length === 0) {
-            // Điều này có thể xảy ra nếu ID không đúng, hoặc Trainer cố sửa khi liên kết tai_khoan_id sai
             return res.status(404).json({ message: 'Không tìm thấy HLV để cập nhật hoặc không có quyền.' });
         }
         res.status(200).json({ message: 'Cập nhật thông tin HLV thành công!', data: rows[0] });
@@ -127,25 +170,34 @@ const updateTrainer = async (req, res) => {
 // --- XÓA HLV (Chỉ Admin) ---
 const deleteTrainer = async (req, res) => {
     const { id } = req.params;
-    console.log(`[Delete Trainer] Nhận yêu cầu xóa ID: ${id}`);
     try {
-        console.log(`[Delete Trainer] Chuẩn bị chạy query xóa ID: ${id}`);
-        // Có thể cần xử lý các liên kết trước khi xóa (ví dụ: gán lại lịch hẹn, xóa liên kết dịch vụ)
-        // await db.query('DELETE FROM hv_dv_bichnt WHERE hlv_id = $1', [id]); // Xóa liên kết dịch vụ
-        // await db.query('UPDATE dat_lich SET hlv_id = NULL WHERE hlv_id = $1', [id]); // Gán lại lịch hẹn
+        await db.query('BEGIN'); // Bắt đầu Transaction xóa
 
-        const { rowCount } = await db.query('DELETE FROM huan_luyen_vien WHERE hlv_id = $1', [id]);
-        console.log(`[Delete Trainer] Query xóa hoàn tất, rowCount: ${rowCount}`);
-
-        if (rowCount === 0) {
+        // 1. Lấy thông tin tài khoản liên kết trước khi xóa HLV
+        const trainerInfo = await db.query('SELECT tai_khoan_id FROM huan_luyen_vien WHERE hlv_id = $1', [id]);
+        
+        if (trainerInfo.rows.length === 0) {
+            await db.query('ROLLBACK');
             return res.status(404).json({ message: 'Không tìm thấy HLV để xóa.' });
         }
-        res.status(200).json({ message: 'Xóa HLV thành công.' });
+        
+        const taiKhoanId = trainerInfo.rows[0].tai_khoan_id;
+
+        // 2. Xóa HLV trong bảng huan_luyen_vien
+        await db.query('DELETE FROM huan_luyen_vien WHERE hlv_id = $1', [id]);
+
+        // 3. Xóa Tài khoản trong bảng tai_khoan (nếu muốn xóa triệt để)
+        if (taiKhoanId) {
+            await db.query('DELETE FROM tai_khoan WHERE user_id = $1', [taiKhoanId]);
+        }
+
+        await db.query('COMMIT');
+        res.status(200).json({ message: 'Xóa HLV và tài khoản thành công.' });
     } catch (error) {
+        await db.query('ROLLBACK');
         console.error(`[Delete Trainer] Lỗi khi xóa ID ${id}:`, error);
-         // Xử lý lỗi khóa ngoại nếu vẫn còn liên kết chưa xử lý
         if (error.code === '23503') {
-             return res.status(400).json({ message: 'Không thể xóa HLV vì vẫn còn dữ liệu liên quan (lịch hẹn, liên kết dịch vụ). Vui lòng xử lý các liên kết trước.' });
+             return res.status(400).json({ message: 'Không thể xóa HLV vì vẫn còn dữ liệu liên quan (lịch hẹn, lớp học). Vui lòng xử lý dữ liệu liên quan trước.' });
         }
         res.status(500).json({ message: 'Lỗi server', error: error.message });
     }
@@ -158,5 +210,5 @@ module.exports = {
     getTrainersByBranch,
     createTrainer,
     updateTrainer,
-    deleteTrainer // <-- Chỉ có một hàm deleteTrainer
+    deleteTrainer
 };
