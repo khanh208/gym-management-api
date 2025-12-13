@@ -3,54 +3,59 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
-const { protect } = require('../middleware/authMiddleware'); // Bảo vệ route
+const fs = require('fs');
 
-// Cấu hình nơi lưu file (lưu vào thư mục 'uploads' ở thư mục gốc)
-const storage = multer.diskStorage({
-    destination(req, file, cb) {
-        cb(null, 'uploads/'); // Thư mục 'uploads' phải tồn tại
-    },
-    filename(req, file, cb) {
-        // Tạo tên file duy nhất: fieldname-timestamp.extension
-        cb(null, `${file.fieldname}-${Date.now()}${path.extname(file.originalname)}`);
-    }
-});
-
-// Kiểm tra loại file (chỉ cho phép ảnh)
-function checkFileType(file, cb) {
-    const filetypes = /jpeg|jpg|png|gif/;
-    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = filetypes.test(file.mimetype);
-
-    if (mimetype && extname) {
-        return cb(null, true);
-    } else {
-        cb(new Error('Chỉ chấp nhận file hình ảnh (jpeg, jpg, png, gif)!'));
-    }
+// 1. Đảm bảo thư mục uploads tồn tại
+const uploadDir = 'uploads/';
+if (!fs.existsSync(uploadDir)){
+    fs.mkdirSync(uploadDir);
 }
 
-const upload = multer({
-    storage: storage,
-    fileFilter: function(req, file, cb) {
-        checkFileType(file, cb);
+// 2. Cấu hình nơi lưu và tên file
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, uploadDir); // Lưu vào thư mục uploads
+    },
+    filename: function (req, file, cb) {
+        // Đặt tên file = timestamp + đuôi file gốc (để tránh trùng tên)
+        // Ví dụ: image-123456789.jpg
+        cb(null, 'image-' + Date.now() + path.extname(file.originalname));
     }
 });
 
-// Định nghĩa API endpoint: POST /api/upload
-// 'protect' đảm bảo chỉ người đã đăng nhập mới được upload
-router.post('/', protect, upload.single('image'), (req, res) => {
-    if (!req.file) {
-        return res.status(400).json({ message: 'Không có file nào được chọn.' });
+// 3. Bộ lọc chỉ chấp nhận ảnh
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: 5 * 1024 * 1024 }, // Giới hạn 5MB
+    fileFilter: function (req, file, cb) {
+        const filetypes = /jpeg|jpg|png|webp|gif/;
+        const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+        const mimetype = filetypes.test(file.mimetype);
+        if (mimetype && extname) {
+            return cb(null, true);
+        } else {
+            cb(new Error('Chỉ chấp nhận file ảnh (jpg, jpeg, png)!'));
+        }
     }
-    
-    // Trả về đường dẫn của file đã upload
-    // Dấu \ cần được thay bằng / để URL hợp lệ trên web
-    const filePath = `/${req.file.path.replace(/\\/g, '/')}`;
-    
-    res.status(201).json({
-        message: 'Upload ảnh thành công!',
-        imagePath: filePath // Ví dụ: /uploads/image-1698420000.jpg
-    });
+});
+
+// 4. API Upload
+router.post('/', upload.single('image'), (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ message: 'Vui lòng chọn file ảnh.' });
+        }
+        // Trả về đường dẫn tương đối (Client sẽ ghép với Domain sau)
+        const filePath = `/uploads/${req.file.filename}`;
+        
+        res.status(200).json({ 
+            message: 'Upload thành công!', 
+            filePath: filePath 
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Lỗi upload file', error: error.message });
+    }
 });
 
 module.exports = router;
