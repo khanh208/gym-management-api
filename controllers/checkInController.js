@@ -38,13 +38,15 @@ const getCustomerCheckInInfo = async (req, res) => {
         );
 
         // 3. Lấy các lịch hẹn HÔM NAY (chưa hoàn thành/hủy)
-        const todayBookings = await db.query(
+       const todayBookings = await db.query(
             `SELECT dl.*, hlv.ho_ten AS ten_hlv, dv.ten AS ten_dich_vu
              FROM dat_lich dl
              LEFT JOIN huan_luyen_vien hlv ON dl.hlv_id = hlv.hlv_id
              LEFT JOIN dich_vu dv ON dl.dich_vu_id = dv.dich_vu_id
              WHERE dl.khach_id = $1
-               AND DATE(dl.thoi_gian) = CURRENT_DATE
+               -- SO SÁNH NGÀY THEO GIỜ VIỆT NAM (Quan trọng)
+               AND DATE(dl.thoi_gian AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh') = DATE(NOW() AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')
+               -- Lấy cả lịch 'cho xac nhan' và 'da xac nhan'
                AND dl.trang_thai NOT IN ('hoan thanh', 'da huy')
             ORDER BY dl.thoi_gian ASC`,
             [khach_id]
