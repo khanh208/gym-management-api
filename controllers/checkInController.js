@@ -114,8 +114,34 @@ const createWalkInTicket = async (req, res) => {
         res.status(500).json({ message: 'Lỗi server', error: error.message });
     }
 };
+const getCheckInHistory = async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                ci.check_in_id,
+                ci.thoi_gian_vao,
+                ci.loai_hinh,
+                ci.trang_thai,
+                kh.ho_ten,
+                kh.so_dien_thoai,
+                cn.ten_chi_nhanh,
+                dv.ten AS ten_dich_vu
+            FROM check_in ci
+            LEFT JOIN khach_hang kh ON ci.khach_id = kh.khach_id
+            LEFT JOIN chi_nhanh cn ON ci.chi_nhanh_id = cn.chi_nhanh_id
+            LEFT JOIN dich_vu dv ON ci.dich_vu_id = dv.dich_vu_id
+            ORDER BY ci.thoi_gian_vao DESC
+        `;
+        const { rows } = await db.query(query);
+        res.status(200).json(rows);
+    } catch (error) {
+        console.error("Lỗi lấy lịch sử check-in:", error);
+        res.status(500).json({ message: 'Lỗi server', error: error.message });
+    }
+};
 
 module.exports = {
     getCustomerCheckInInfo,
+    getCheckInHistory,
     createWalkInTicket
 };
