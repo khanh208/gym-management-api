@@ -9,6 +9,7 @@ const connectionString = process.env.DATABASE_URL ||
     `postgresql://postgres:Ig8mlESViWErnZgx@db.iyxngxwugmmzrdvnithj.supabase.co:5432/postgres`;
 
 const pool = new Pool({
+    timezone: 'Asia/Ho_Chi_Minh',
     connectionString: connectionString,
     // Cấu hình SSL là BẮT BUỘC khi kết nối với Supabase/Cloud DB
     // Chúng ta bật SSL nếu không chạy trong môi trường phát triển (DEV)
@@ -16,6 +17,7 @@ const pool = new Pool({
         // Tùy chọn này giúp kết nối ổn định hơn trên Render
         rejectUnauthorized: false
     } : false 
+    
 });
 
 pool.on('error', (err, client) => {
