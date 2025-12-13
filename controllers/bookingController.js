@@ -42,7 +42,7 @@ const getBookingsByCustomer = async (req, res) => {
     }
 };
 
-// --- TẠO LỊCH HẸN MỚI (ĐÃ FIX LỖI MÚI GIỜ +7) ---
+// --- TẠO LỊCH HẸN MỚI (ĐÃ FIX LỖI MÚI GIỜ & BUFFER TIME) ---
 const createBooking = async (req, res) => {
     const { gkh_id, dich_vu_id, chi_nhanh_id, hlv_id, thoi_gian } = req.body;
     const tai_khoan_id = req.user.user_id;
@@ -51,35 +51,31 @@ const createBooking = async (req, res) => {
         return res.status(400).json({ message: 'Vui lòng chọn Gói tập, Dịch vụ, Chi nhánh và Thời gian.' });
     }
 
-    // --- BẮT ĐẦU FIX LỖI TIMEZONE TẠI ĐÂY ---
-    // 1. Tạo đối tượng ngày từ dữ liệu gửi lên (Server hiểu là UTC)
-    const bookingStartTime = new Date(thoi_gian);
+    // --- 1. XỬ LÝ MÚI GIỜ (AUTO FIX TIMEZONE) ---
+    let timeString = thoi_gian;
+    // Nếu chuỗi thời gian chưa có múi giờ (Z hoặc +), mặc định ép về +07:00 (Vietnam Time)
+    if (!timeString.includes('Z') && !timeString.includes('+')) {
+        timeString += '+07:00'; 
+    }
+    const bookingStartTime = new Date(timeString);
 
-    // 2. Trừ đi 7 tiếng để đưa về đúng giờ Việt Nam chuẩn trong DB
-    // Ví dụ: Bạn đặt 10:00 VN -> Server nhận 10:00 UTC -> Trừ 7h = 03:00 UTC (Lưu vào DB)
-    // Khi hiển thị: 03:00 UTC + 7h = 10:00 VN (ĐÚNG)
-    bookingStartTime.setHours(bookingStartTime.getHours() - 7); 
-    
     // Kiểm tra hợp lệ
     if (isNaN(bookingStartTime.getTime())) {
         return res.status(400).json({ message: 'Định dạng thời gian không hợp lệ.' });
     }
 
-    // 3. Tính thời gian kết thúc (Dựa trên giờ đã sửa)
-    const DURATION_MINUTES = 60; 
-    const bookingEndTime = new Date(bookingStartTime.getTime() + DURATION_MINUTES * 60000);
-
-    // 4. Kiểm tra quá khứ (Cũng phải so với giờ hiện tại đã trừ 7 tiếng hoặc so sánh UTC chuẩn)
-    // Cách đơn giản nhất: So sánh số milliseconds
+    // --- 2. LOGIC VÙNG ĐỆM (BUFFER TIME) ---
     const now = new Date();
-    // Server Render chạy giờ UTC (ví dụ 10h), giờ VN là 17h.
-    // bookingStartTime đã được lùi về UTC chuẩn.
-    // Nên ta so sánh trực tiếp là ổn.
-    if (bookingStartTime < now) {
-       // return res.status(400).json({ message: 'Thời gian không hợp lệ. Bạn không thể đặt lịch trong quá khứ.' });
-       // Tạm comment dòng này nếu test thấy khó khăn, nhưng logic trên là đúng.
+    // Cho phép trễ tối đa 5 phút (để tránh việc người dùng bấm chậm 1-2s bị báo lỗi quá khứ)
+    const bufferTime = new Date(now.getTime() - 5 * 60000); 
+
+    if (bookingStartTime < bufferTime) {
+         return res.status(400).json({ message: 'Thời gian không hợp lệ. Bạn không thể đặt lịch trong quá khứ.' });
     }
-    // --- KẾT THÚC FIX LỖI TIMEZONE ---
+
+    // --- 3. TÍNH THỜI GIAN KẾT THÚC ---
+    const DURATION_MINUTES = 60; // Mặc định 1 buổi tập 60 phút
+    const bookingEndTime = new Date(bookingStartTime.getTime() + DURATION_MINUTES * 60000);
 
     try {
         // Lấy khach_id
@@ -99,10 +95,12 @@ const createBooking = async (req, res) => {
         }
         const activePackage = pkgResult.rows[0];
 
+        // Check trạng thái gói
         if (activePackage.trang_thai !== 'active') {
              return res.status(400).json({ message: `Đặt lịch thất bại. Gói tập này đã ${activePackage.trang_thai}.` });
         }
         
+        // Check ngày hết hạn
         if (activePackage.ngay_het_han) {
             const expiryDate = new Date(activePackage.ngay_het_han);
             if (bookingStartTime > expiryDate) { 
@@ -110,11 +108,12 @@ const createBooking = async (req, res) => {
             }
         }
         
+        // Check số buổi còn lại
         if (activePackage.tong_so_buoi !== null && activePackage.so_buoi_da_tap >= activePackage.tong_so_buoi) {
             return res.status(400).json({ message: `Đặt lịch thất bại. Bạn đã sử dụng hết ${activePackage.tong_so_buoi} buổi.` });
         }
         
-        // KIỂM TRA TRÙNG LỊCH
+        // Check trùng lịch HLV
         if (hlv_id) { 
             const conflictCheck = await db.query(
                 `SELECT 1 FROM dat_lich
@@ -128,7 +127,7 @@ const createBooking = async (req, res) => {
             }
         }
 
-        // TẠO LỊCH HẸN
+        // Tạo lịch hẹn
         const query = `
             INSERT INTO dat_lich (khach_id, hlv_id, chi_nhanh_id, dich_vu_id, thoi_gian, thoi_gian_ket_thuc, trang_thai, gkh_id)
             VALUES ($1, $2, $3, $4, $5, $6, 'cho xac nhan', $7) RETURNING *;
@@ -146,7 +145,7 @@ const createBooking = async (req, res) => {
     }
 };
 
-// --- CẬP NHẬT TRẠNG THÁI LỊCH HẸN ---
+// --- CẬP NHẬT TRẠNG THÁI LỊCH HẸN (Transaction an toàn) ---
 const updateBookingStatus = async (req, res) => {
     const { id: lichIdToUpdate } = req.params;
     const { trang_thai } = req.body;
@@ -181,6 +180,7 @@ const updateBookingStatus = async (req, res) => {
             }
         }
         
+        // Logic trừ buổi tập khi hoàn thành
         if (trang_thai === 'hoan thanh' && booking.trang_thai !== 'hoan thanh') {
             if (booking.gkh_id) { 
                 const pkgResult = await db.query('SELECT * FROM goi_khach_hang WHERE gkh_id = $1 FOR UPDATE', [booking.gkh_id]);
