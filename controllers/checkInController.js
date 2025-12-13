@@ -8,6 +8,18 @@ const getCustomerCheckInInfo = async (req, res) => {
     const { khach_id } = req.params;
 
     try {
+        // --- LOGIC MỚI: TỰ ĐỘNG KÍCH HOẠT GÓI ĐẾN HẠN ---
+        // Kiểm tra nếu có gói 'pending' mà ngày kích hoạt <= hiện tại thì chuyển sang 'active'
+        await db.query(
+            `UPDATE goi_khach_hang 
+             SET trang_thai = 'active' 
+             WHERE khach_id = $1 
+               AND trang_thai = 'pending' 
+               AND ngay_kich_hoat <= NOW()`,
+            [khach_id]
+        );
+        // -----------------------------------------------
+
         // 1. Lấy thông tin cơ bản của khách
         const customerResult = await db.query('SELECT * FROM khach_hang WHERE khach_id = $1', [khach_id]);
         if (customerResult.rows.length === 0) {
@@ -15,7 +27,7 @@ const getCustomerCheckInInfo = async (req, res) => {
         }
         const customerInfo = customerResult.rows[0];
 
-        // 2. Lấy các gói đang active
+        // 2. Lấy các gói đang active (Sau khi đã update ở trên)
         const packages = await db.query(
             `SELECT gkh.*, g.ten AS ten_goi_tap 
              FROM goi_khach_hang gkh
@@ -49,7 +61,10 @@ const getCustomerCheckInInfo = async (req, res) => {
         res.status(500).json({ message: 'Lỗi server', error: error.message });
     }
 };
-    const createWalkInTicket = async (req, res) => {
+
+// @desc    Tạo vé vãng lai và Check-in ngay lập tức
+// @route   POST /api/check-in/walk-in
+const createWalkInTicket = async (req, res) => {
     // 1. Lấy dữ liệu
     const { ho_ten, so_dien_thoai, chi_nhanh_id, dich_vu_id, so_tien, phuong_thuc_tt } = req.body;
 
@@ -59,33 +74,37 @@ const getCustomerCheckInInfo = async (req, res) => {
     }
 
     try {
-        // Bắt đầu transaction (theo phong cách dự án của bạn)
         await db.query('BEGIN');
 
         // 2. Tìm hoặc Tạo khách hàng mới
         let khach_id;
-        const checkKhach = await db.query('SELECT khach_id FROM khach_hang WHERE so_dien_thoai = $1', [so_dien_thoai]);
         
-        if (checkKhach.rows.length > 0) {
-            khach_id = checkKhach.rows[0].khach_id;
-        } else {
-            // Tạo khách mới (loại vãng lai)
+        // Nếu có SĐT thì tìm xem đã có khách chưa
+        if (so_dien_thoai) {
+             const checkKhach = await db.query('SELECT khach_id FROM khach_hang WHERE so_dien_thoai = $1', [so_dien_thoai]);
+             if (checkKhach.rows.length > 0) {
+                 khach_id = checkKhach.rows[0].khach_id;
+             }
+        }
+
+        // Nếu chưa có (hoặc không nhập SĐT) thì tạo mới
+        if (!khach_id) {
+            // SỬA LỖI TẠI ĐÂY: Bỏ trường loai_thanh_vien và mat_khau
             const newGuest = await db.query(
-                `INSERT INTO khach_hang (ho_ten, so_dien_thoai, loai_thanh_vien, mat_khau) 
-                 VALUES ($1, $2, 'vang_lai', 'guest123') RETURNING khach_id`,
+                `INSERT INTO khach_hang (ho_ten, so_dien_thoai) 
+                 VALUES ($1, $2) RETURNING khach_id`,
                 [ho_ten, so_dien_thoai || null]
             );
             khach_id = newGuest.rows[0].khach_id;
         }
 
-        // 3. Ghi nhận Check-in
+        // 3. Ghi nhận Check-in NGAY LẬP TỨC (NOW)
         await db.query(
             `INSERT INTO check_in (khach_id, chi_nhanh_id, dich_vu_id, thoi_gian_vao, trang_thai, loai_hinh)
              VALUES ($1, $2, $3, NOW(), 'dang_tap', 've_le')`,
             [khach_id, chi_nhanh_id, dich_vu_id]
         );
 
-        // Hoàn tất
         await db.query('COMMIT');
         res.status(200).json({ message: 'Tạo vé & Check-in thành công!', khach_id: khach_id });
 
