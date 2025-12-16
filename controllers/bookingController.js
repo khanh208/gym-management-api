@@ -112,6 +112,38 @@ const createBooking = async (req, res) => {
     const DURATION_MINUTES = 60;
     const bookingEndTime = new Date(bookingStartTime.getTime() + DURATION_MINUTES * 60000);
 
+    // --- 4. KIỂM TRA GIỜ HOẠT ĐỘNG (6H - 22H) ---
+    // Chuyển về múi giờ VN để lấy giờ chính xác
+    const startHour = parseInt(bookingStartTime.toLocaleString('en-US', { 
+        timeZone: 'Asia/Ho_Chi_Minh', 
+        hour: '2-digit', 
+        hour12: false 
+    }));
+    const endHour = parseInt(bookingEndTime.toLocaleString('en-US', { 
+        timeZone: 'Asia/Ho_Chi_Minh', 
+        hour: '2-digit', 
+        hour12: false 
+    }));
+    const endMinute = parseInt(bookingEndTime.toLocaleString('en-US', { 
+        timeZone: 'Asia/Ho_Chi_Minh', 
+        minute: '2-digit'
+    }));
+
+    // Quy tắc 1: Giờ bắt đầu phải từ 6h trở đi
+    if (startHour < 6) {
+        return res.status(400).json({ 
+            message: 'Đặt lịch thất bại. Phòng tập chỉ mở cửa từ 6:00 sáng. Vui lòng chọn giờ từ 6:00 trở đi.' 
+        });
+    }
+
+    // Quy tắc 2: Giờ kết thúc phải <= 22:00
+    if (endHour > 22 || (endHour === 22 && endMinute > 0)) {
+        return res.status(400).json({ 
+            message: 'Đặt lịch thất bại. Phòng tập đóng cửa lúc 22:00. Buổi tập của bạn kết thúc lúc ' + 
+                     `${endHour}:${endMinute.toString().padStart(2, '0')}. Vui lòng chọn giờ sớm hơn.`
+        });
+    }
+
     try {
         // Lấy khach_id
         const customerProfile = await db.query('SELECT khach_id FROM khach_hang WHERE tai_khoan_id = $1', [tai_khoan_id]);
