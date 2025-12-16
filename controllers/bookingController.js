@@ -72,11 +72,26 @@ const getBookingsByCustomer = async (req, res) => {
 
 // --- TẠO LỊCH HẸN MỚI (ĐÃ FIX LỖI MÚI GIỜ & BUFFER TIME) ---
 const createBooking = async (req, res) => {
-    const { gkh_id, dich_vu_id, chi_nhanh_id, hlv_id, thoi_gian } = req.body;
+    const { gkh_id, dich_vu_id, chi_nhanh_id, hlv_id, thoi_gian, ngay_kich_hoat, ho_ten, so_dien_thoai } = req.body;
     const tai_khoan_id = req.user.user_id;
 
+    // Validate đầy đủ thông tin
     if (!gkh_id || !dich_vu_id || !chi_nhanh_id || !thoi_gian) {
         return res.status(400).json({ message: 'Vui lòng chọn Gói tập, Dịch vụ, Chi nhánh và Thời gian.' });
+    }
+    
+    if (!ngay_kich_hoat) {
+        return res.status(400).json({ message: 'Vui lòng chọn Ngày kích hoạt gói tập.' });
+    }
+    
+    if (!ho_ten || !so_dien_thoai) {
+        return res.status(400).json({ message: 'Vui lòng nhập đầy đủ Họ tên và Số điện thoại.' });
+    }
+    
+    // Validate số điện thoại (10 số, bắt đầu bằng 0)
+    const phoneRegex = /^0\d{9}$/;
+    if (!phoneRegex.test(so_dien_thoai)) {
+        return res.status(400).json({ message: 'Số điện thoại không hợp lệ. Vui lòng nhập 10 số, bắt đầu bằng 0.' });
     }
 
     // --- 1. XỬ LÝ MÚI GIỜ (AUTO FIX TIMEZONE) ---
